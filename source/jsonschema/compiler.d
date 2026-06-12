@@ -362,6 +362,27 @@ private bool compileApplicatorKeyword(Session sess, CompiledSchema s, string key
             s.dependentSchemas[m.key] = walk(sess, m.value,
                     frames.extend("/dependentSchemas/" ~ escapeToken(m.key)), null);
         return true;
+    case "dependencies":
+        // Pre-2019 compatibility keyword: an array value behaves like
+        // dependentRequired, a schema value like dependentSchemas.
+        requireObject(val, key);
+        foreach (ref m; val.members_)
+        {
+            if (m.value.isArray)
+            {
+                string[] names;
+                foreach (ref e; m.value.array_)
+                {
+                    requireString(e, "dependencies entries");
+                    names ~= e.string_;
+                }
+                s.dependentRequired[m.key] = names;
+            }
+            else
+                s.dependentSchemas[m.key] = walk(sess, m.value,
+                        frames.extend("/dependencies/" ~ escapeToken(m.key)), null);
+        }
+        return true;
     case "properties":
         requireObject(val, key);
         foreach (ref m; val.members_)
@@ -649,10 +670,89 @@ package auto compileRegex(string source, string keyword)
     import std.regex : regex, RegexException;
 
     try
-        return regex(source);
+        return regex(ecmaShorthand(source));
     catch (RegexException e)
         throw new SchemaCompileException("invalid " ~ keyword ~ " regular expression '"
                 ~ source ~ "': " ~ e.msg);
+}
+
+// ECMA-262 whitespace: TAB-CR, SP, NBSP, ZWNBSP, and the Unicode Zs / line
+// separator characters (as D \u escapes, literal characters in the class).
+private enum ecmaSpace = "\\t-\\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
+/// Translate the ECMA-262 shorthand classes \d \w \s (and negations) into
+/// their ASCII-only / ECMA-exact equivalents. std.regex interprets them as
+/// Unicode-aware classes, but JSON Schema patterns use ECMA-262 semantics
+/// where \d is exactly [0-9] and \w is [A-Za-z0-9_].
+package string ecmaShorthand(string src) pure
+{
+    string r;
+    r.reserve(src.length);
+    bool inClass = false;
+    size_t i = 0;
+    while (i < src.length)
+    {
+        const c = src[i];
+        if (c == '\\' && i + 1 < src.length)
+        {
+            // UTS#18-style property names ECMA allows but std.regex does not.
+            if (src.length >= i + 9 && src[i + 1] == 'p' && src[i + 2 .. i + 9] == "{digit}")
+            {
+                r ~= "\\p{Nd}";
+                i += 9;
+                continue;
+            }
+            const e = src[i + 1];
+            string outOpen = inClass ? "" : "[";
+            string outClose = inClass ? "" : "]";
+            switch (e)
+            {
+            case 'd':
+                r ~= outOpen ~ "0-9" ~ outClose;
+                break;
+            case 'w':
+                r ~= outOpen ~ "A-Za-z0-9_" ~ outClose;
+                break;
+            case 's':
+                r ~= outOpen ~ ecmaSpace ~ outClose;
+                break;
+            case 'D':
+                if (inClass)
+                    r ~= `\D`; // not expressible inside a class; keep as-is
+                else
+                    r ~= "[^0-9]";
+                break;
+            case 'W':
+                if (inClass)
+                    r ~= `\W`;
+                else
+                    r ~= "[^A-Za-z0-9_]";
+                break;
+            case 'S':
+                if (inClass)
+                    r ~= `\S`;
+                else
+                    r ~= "[^" ~ ecmaSpace ~ "]";
+                break;
+            case 'a':
+                // ECMA-262 has no \a control escape; it is an identity
+                // escape for the letter 'a' (std.regex would read BEL).
+                r ~= 'a';
+                break;
+            default:
+                r ~= src[i .. i + 2];
+            }
+            i += 2;
+            continue;
+        }
+        if (c == '[' && !inClass)
+            inClass = true;
+        else if (c == ']' && inClass)
+            inClass = false;
+        r ~= c;
+        i++;
+    }
+    return r;
 }
 
 // --- reference resolution ---

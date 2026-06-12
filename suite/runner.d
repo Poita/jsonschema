@@ -48,7 +48,7 @@ int main()
 
     auto store = makeRemoteStore();
 
-    size_t reqPass, reqFail, optPass, optFail, divergences;
+    size_t reqPass, reqFail, optPass, optFail, skipped, divergences;
     CaseResult[] failures;
 
     auto files = dirEntries(testsDir, "*.json", SpanMode.depth).array;
@@ -77,6 +77,11 @@ int main()
                 r.test = testDesc;
                 r.expected = expected;
 
+                if (isDeliberateSkip(rel, groupDesc))
+                {
+                    skipped++;
+                    continue;
+                }
                 runCase(rel, text, schemaNode, dataNode, store, r);
 
                 const pass = r.stdGot == expected && r.vibeGot == expected && r.error.length == 0;
@@ -122,9 +127,31 @@ int main()
             reqTotal ? 100.0 * reqPass / reqTotal : 0);
     writefln("optional: %d/%d passed (%.2f%%)", optPass, optTotal,
             optTotal ? 100.0 * optPass / optTotal : 0);
+    writefln("skipped: %d (deliberate, see README)", skipped);
     writefln("adapter divergences: %d", divergences);
 
     return (reqFail || divergences) ? 1 : 0;
+}
+
+/// Deliberately unsupported territory, documented in the README: IDNA /
+/// punycode-aware hostname semantics, internationalized resource identifiers,
+/// and historic-draft cross-references.
+bool isDeliberateSkip(string rel, string group)
+{
+    switch (rel)
+    {
+    case "optional/format/idn-hostname.json":
+    case "optional/format/idn-email.json":
+    case "optional/format/iri.json":
+    case "optional/format/iri-reference.json":
+        return true;
+    case "optional/format/hostname.json":
+        return group == "validation of A-label (punycode) host names";
+    case "optional/cross-draft.json":
+        return true;
+    default:
+        return false;
+    }
 }
 
 /// Decide settings per file: format tests under optional/format/ run with

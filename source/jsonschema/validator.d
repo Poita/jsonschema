@@ -749,7 +749,7 @@ private int cmpIntFloat(in JsonNumber i, double f) pure nothrow
 /// JSON Schema multipleOf. Exact integer arithmetic when both operands are
 /// integral; otherwise a quotient-rounding check with a small relative
 /// tolerance (so 0.0075 is a multiple of 0.0001 despite binary representation).
-package bool isMultipleOf(in JsonNumber v, in JsonNumber m) pure nothrow
+package bool isMultipleOf(in JsonNumber v, in JsonNumber m) nothrow @trusted
 {
     alias R = JsonNumber.Rep;
     if (v.isIntegral && m.isIntegral)
@@ -768,7 +768,13 @@ package bool isMultipleOf(in JsonNumber v, in JsonNumber m) pure nothrow
         return false;
     const q = dv / dm;
     if (!isFinite(q))
-        return false;
+    {
+        // The quotient overflowed (huge value, tiny divisor): fall back to
+        // fmod, which cannot overflow.
+        import core.stdc.math : fmod;
+
+        return fmod(dv, dm) == 0;
+    }
     const r = nearbyint(q);
     const eps = fabs(dv) * 1e-12 + double.min_normal;
     return fabs(r * dm - dv) <= eps;

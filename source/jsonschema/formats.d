@@ -193,8 +193,9 @@ bool isDuration(string s) pure nothrow
 
     static bool units(string part, string order)
     {
-        // Each unit letter at most once, in the given order, each preceded by digits.
-        size_t oi = 0;
+        // The RFC 3339 ABNF chains units without gaps: each unit may only be
+        // followed directly by the next one in order (P1Y2M valid, P1Y2D not).
+        ptrdiff_t prev = -1;
         size_t i = 0;
         bool any = false;
         while (i < part.length)
@@ -205,19 +206,16 @@ bool isDuration(string s) pure nothrow
             if (i == ds || i == part.length)
                 return false;
             const u = part[i];
-            bool found = false;
-            while (oi < order.length)
-            {
-                if (order[oi] == u)
+            ptrdiff_t pos = -1;
+            foreach (oi, c; order)
+                if (c == u)
                 {
-                    found = true;
-                    oi++;
+                    pos = oi;
                     break;
                 }
-                oi++;
-            }
-            if (!found)
+            if (pos < 0 || (prev >= 0 && pos != prev + 1))
                 return false;
+            prev = pos;
             i++;
             any = true;
         }
@@ -420,17 +418,16 @@ bool isIpv6(string s) pure nothrow
         }
 
     int headGroups, tailGroups;
-    if (!countGroups(head, headGroups, false))
-        return false;
     if (compressed)
     {
+        // An IPv4 tail can only appear in the final position, i.e. the tail.
+        if (!countGroups(head, headGroups, false))
+            return false;
         if (!countGroups(tail, tailGroups, true))
             return false;
     }
     else
     {
-        // Without compression the whole address is in `head`; re-scan allowing
-        // an IPv4 tail.
         if (!countGroups(s, headGroups, true))
             return false;
     }
@@ -513,6 +510,8 @@ bool isUri(string s, bool allowRelative) pure nothrow
     auto u = parseUri(s);
     if (!allowRelative && u.scheme.length == 0)
         return false;
+    if (u.hasAuthority && !validAuthority(u.authority))
+        return false;
     // Brackets are only legal in an IP-literal authority.
     foreach (j, c; s)
         if (c == '[' || c == ']')
@@ -539,6 +538,25 @@ bool isUri(string s, bool allowRelative) pure nothrow
         }
         else if (!isIpv6(lit))
             return false;
+    }
+    return true;
+}
+
+private bool validAuthority(string a) pure nothrow
+{
+    // authority = [userinfo "@"] host [":" port]; the port must be digits.
+    foreach_reverse (i; 0 .. a.length)
+    {
+        const c = a[i];
+        if (c == ']' || c == '@')
+            break; // IP-literal or no port
+        if (c == ':')
+        {
+            foreach (pc; a[i + 1 .. $])
+                if (!isDigit(pc))
+                    return false;
+            break;
+        }
     }
     return true;
 }
@@ -600,11 +618,53 @@ bool isUuid(string s) pure nothrow
     return true;
 }
 
-/// A string that compiles as a regular expression.
+/// A string that is a valid ECMA-262 regular expression: it must compile, and
+/// every backslash escape of an ASCII letter must be one ECMA defines (\a,
+/// for example, is not a control escape and not a permitted identity escape).
 bool isRegex(string s)
 {
     import std.regex : regex, RegexException;
 
+    size_t i = 0;
+    while (i + 1 < s.length)
+    {
+        if (s[i] == '\\')
+        {
+            const e = s[i + 1];
+            const letter = (e >= 'a' && e <= 'z') || (e >= 'A' && e <= 'Z');
+            if (letter)
+            {
+                switch (e)
+                {
+                case 'b':
+                case 'B':
+                case 'c':
+                case 'd':
+                case 'D':
+                case 'f':
+                case 'k':
+                case 'n':
+                case 'p':
+                case 'P':
+                case 'r':
+                case 's':
+                case 'S':
+                case 't':
+                case 'u':
+                case 'v':
+                case 'w':
+                case 'W':
+                case 'x':
+                    break;
+                default:
+                    return false;
+                }
+            }
+            i += 2;
+            continue;
+        }
+        i++;
+    }
     try
     {
         cast(void) regex(s);
