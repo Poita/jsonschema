@@ -5,7 +5,9 @@
 __test__*__
 __dummy.html
 docs.json
-/libjsonschema.a
+/libjsonschema*.a
+/jsonschema-vibe-test-library
+/jsonschema-test-library
 /jsonschema-test-*
 /suite-runner
 dub.selections.json
