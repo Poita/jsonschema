@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (${{ matrix.dc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dc: [ldc-latest, dmd-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.dc }}
+
+      - name: Unit tests (base package)
+        run: dub test
+
+      - name: Unit tests (vibe subpackage)
+        run: dub test :vibe
+
+      - name: Official JSON-Schema-Test-Suite (both adapters, pass rate in log)
+        run: dub run :suite-runner
