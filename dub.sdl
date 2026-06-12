@@ -1,0 +1,28 @@
+name "jsonschema"
+description "Complete JSON Schema 2020-12 validator and compile-time D-type schema generator"
+authors "Peter Alexander"
+license "Apache-2.0"
+copyright "Copyright © 2026, Peter Alexander"
+targetType "library"
+stringImportPaths "res"
+
+subPackage {
+	name "vibe"
+	description "vibe.data.json adapter for jsonschema"
+	targetType "library"
+	sourcePaths "vibe/source"
+	importPaths "vibe/source"
+	dependency "jsonschema" path="."
+	dependency "vibe-d:data" version=">=0.9.0 <0.11.0"
+}
+
+subPackage {
+	name "suite-runner"
+	description "Official JSON-Schema-Test-Suite harness (runs every 2020-12 case through both JSON adapters)"
+	targetType "executable"
+	targetName "suite-runner"
+	sourcePaths "suite"
+	importPaths "suite"
+	dependency "jsonschema" path="."
+	dependency "jsonschema:vibe" path="."
+}

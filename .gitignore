@@ -1,0 +1,11 @@
+.dub/
+*.o
+*.obj
+*.lst
+__test__*__
+__dummy.html
+docs.json
+/libjsonschema.a
+/jsonschema-test-*
+/suite-runner
+dub.selections.json
