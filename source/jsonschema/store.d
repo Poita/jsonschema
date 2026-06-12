@@ -71,7 +71,7 @@ final class SchemaStore
     }
 }
 
-unittest // a fresh store carries the bundled meta-schemas
+unittest  // a fresh store carries the bundled meta-schemas
 {
     auto store = new SchemaStore;
     assert(store.contains("https://json-schema.org/draft/2020-12/schema"));
@@ -79,7 +79,7 @@ unittest // a fresh store carries the bundled meta-schemas
     assert(store.contains("https://json-schema.org/draft/2020-12/meta/format-annotation"));
 }
 
-unittest // register from text and from std.json
+unittest  // register from text and from std.json
 {
     import std.json : parseJSON;
 

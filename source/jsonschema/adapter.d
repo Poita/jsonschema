@@ -322,7 +322,7 @@ struct JsonNodeAdapter
 
 static assert(isJsonAdapter!JsonNodeAdapter);
 
-unittest // StdJsonAdapter classifies every JSON kind
+unittest  // StdJsonAdapter classifies every JSON kind
 {
     import std.json : parseJSON;
 
@@ -336,7 +336,7 @@ unittest // StdJsonAdapter classifies every JSON kind
     assert(A.kindOf(parseJSON("{}")) == JsonKind.object);
 }
 
-unittest // StdJsonAdapter keeps 64-bit integer fidelity
+unittest  // StdJsonAdapter keeps 64-bit integer fidelity
 {
     import std.json : parseJSON;
 
@@ -351,7 +351,7 @@ unittest // StdJsonAdapter keeps 64-bit integer fidelity
     assert(un.u == ulong.max);
 }
 
-unittest // a ulong that fits in long normalizes to the signed representation
+unittest  // a ulong that fits in long normalizes to the signed representation
 {
     import std.json : JSONValue;
 
@@ -360,7 +360,7 @@ unittest // a ulong that fits in long normalizes to the signed representation
     assert(n.s == 42);
 }
 
-unittest // StdJsonAdapter object access
+unittest  // StdJsonAdapter object access
 {
     import std.json : parseJSON;
 
@@ -369,11 +369,14 @@ unittest // StdJsonAdapter object access
     assert(StdJsonAdapter.objectGet(v, "a") !is null);
     assert(StdJsonAdapter.objectGet(v, "zz") is null);
     int count;
-    StdJsonAdapter.objectEach(v, (string k, in JSONValue val) { count++; return 0; });
+    StdJsonAdapter.objectEach(v, (string k, in JSONValue val) {
+        count++;
+        return 0;
+    });
     assert(count == 2);
 }
 
-unittest // StdJsonAdapter array access
+unittest  // StdJsonAdapter array access
 {
     import std.json : parseJSON;
 
@@ -382,7 +385,7 @@ unittest // StdJsonAdapter array access
     assert(StdJsonAdapter.arrayAt(v, 1).integer == 20);
 }
 
-unittest // JsonNodeAdapter mirrors the node values
+unittest  // JsonNodeAdapter mirrors the node values
 {
     import jsonschema.node : parseJson;
 

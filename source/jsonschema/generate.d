@@ -41,8 +41,7 @@ private template isStdDateTime(T)
     import std.datetime.date : Date, DateTime, TimeOfDay;
     import std.datetime.systime : SysTime;
 
-    enum isStdDateTime = is(T == SysTime) || is(T == DateTime) || is(T == Date)
-        || is(T == TimeOfDay);
+    enum isStdDateTime = is(T == SysTime) || is(T == DateTime) || is(T == Date) || is(T == TimeOfDay);
 }
 
 private template stdDateTimeFormat(T)
@@ -194,8 +193,8 @@ private JsonNode emitType(T)(ref GenContext ctx)
     else static if (isAssociativeArray!T)
     {
         static assert(isSomeString!(KeyType!T),
-                "jsonSchemaOf: unsupported associative-array key type " ~ KeyType!T.stringof
-                ~ " in " ~ T.stringof ~ " (JSON object keys must be strings)");
+                "jsonSchemaOf: unsupported associative-array key type "
+                ~ KeyType!T.stringof ~ " in " ~ T.stringof ~ " (JSON object keys must be strings)");
         auto s = typeSchema("object");
         s.set("additionalProperties", emitType!(ValueType!T)(ctx));
         return s;
@@ -380,7 +379,7 @@ version (unittest)
     import std.meta : AliasSeq;
 }
 
-unittest // scalar schemas
+unittest  // scalar schemas
 {
     assert(jsonSchemaOf!int.get("type").string_ == "integer");
     assert(jsonSchemaOf!double.get("type").string_ == "number");
@@ -388,7 +387,7 @@ unittest // scalar schemas
     assert(jsonSchemaOf!string.get("type").string_ == "string");
 }
 
-unittest // unsigned integers carry minimum 0
+unittest  // unsigned integers carry minimum 0
 {
     auto s = jsonSchemaOf!uint;
     assert(s.get("type").string_ == "integer");
@@ -396,7 +395,7 @@ unittest // unsigned integers carry minimum 0
     assert(jsonSchemaOf!int.get("minimum") is null);
 }
 
-unittest // enum becomes a string with members
+unittest  // enum becomes a string with members
 {
     enum Color
     {
@@ -411,14 +410,14 @@ unittest // enum becomes a string with members
     assert(s.get("enum").array_[0].string_ == "red");
 }
 
-unittest // arrays carry an items schema
+unittest  // arrays carry an items schema
 {
     auto s = jsonSchemaOf!(int[]);
     assert(s.get("type").string_ == "array");
     assert(s.get("items").get("type").string_ == "integer");
 }
 
-unittest // structs become objects with properties and required
+unittest  // structs become objects with properties and required
 {
     struct Point
     {
@@ -437,7 +436,7 @@ unittest // structs become objects with properties and required
     assert(s.get("required").array_.length == 2);
 }
 
-unittest // Nullable emits anyOf with the inner schema and null
+unittest  // Nullable emits anyOf with the inner schema and null
 {
     auto s = jsonSchemaOf!(Nullable!int);
     assert(s.get("anyOf").array_.length == 2);
@@ -445,7 +444,7 @@ unittest // Nullable emits anyOf with the inner schema and null
     assert(s.get("anyOf").array_[1].get("type").string_ == "null");
 }
 
-unittest // SumType maps to anyOf over the variant schemas
+unittest  // SumType maps to anyOf over the variant schemas
 {
     import std.sumtype : SumType;
 
@@ -459,14 +458,14 @@ unittest // SumType maps to anyOf over the variant schemas
     assert(s.get("anyOf").array_[2].get("type").string_ == "object");
 }
 
-unittest // associative arrays map to additionalProperties
+unittest  // associative arrays map to additionalProperties
 {
     auto s = jsonSchemaOf!(int[string]);
     assert(s.get("type").string_ == "object");
     assert(s.get("additionalProperties").get("type").string_ == "integer");
 }
 
-unittest // std.datetime types map to formatted strings
+unittest  // std.datetime types map to formatted strings
 {
     import std.datetime.date : Date, DateTime, TimeOfDay;
     import std.datetime.systime : SysTime;
@@ -477,7 +476,7 @@ unittest // std.datetime types map to formatted strings
     assert(jsonSchemaOf!TimeOfDay.get("format").string_ == "time");
 }
 
-unittest // a recursive struct goes to $defs with a $ref
+unittest  // a recursive struct goes to $defs with a $ref
 {
     static struct Tree
     {
@@ -493,7 +492,7 @@ unittest // a recursive struct goes to $defs with a $ref
     assert(def.get("properties").get("children").get("items").get("$ref").string_ == "#/$defs/Tree");
 }
 
-unittest // a struct used in two places is shared via $defs
+unittest  // a struct used in two places is shared via $defs
 {
     static struct Leaf
     {
@@ -512,7 +511,7 @@ unittest // a struct used in two places is shared via $defs
     assert(s.get("$defs").get("Leaf").get("type").string_ == "object");
 }
 
-unittest // a single-use struct stays inline (no $defs)
+unittest  // a single-use struct stays inline (no $defs)
 {
     static struct Inner
     {
@@ -529,7 +528,7 @@ unittest // a single-use struct stays inline (no $defs)
     assert(s.get("properties").get("one").get("type").string_ == "object");
 }
 
-unittest // facet UDAs are emitted onto property schemas
+unittest  // facet UDAs are emitted onto property schemas
 {
     import jsonschema.attributes;
 
@@ -560,7 +559,7 @@ unittest // facet UDAs are emitted onto property schemas
     assert(s.get("required").array_.length == 3);
 }
 
-unittest // fields with declared defaults are optional
+unittest  // fields with declared defaults are optional
 {
     static struct Options
     {
@@ -574,7 +573,7 @@ unittest // fields with declared defaults are optional
     assert(s.get("required").array_[0].string_ == "required_");
 }
 
-unittest // @schemaDefault marks a field optional even at .init value
+unittest  // @schemaDefault marks a field optional even at .init value
 {
     import jsonschema.attributes : schemaDefault;
 
@@ -588,7 +587,7 @@ unittest // @schemaDefault marks a field optional even at .init value
     assert(s.get("required") is null);
 }
 
-unittest // @schemaDefault on an enum field emits the member name
+unittest  // @schemaDefault on an enum field emits the member name
 {
     import jsonschema.attributes : schemaDefault;
 
@@ -607,14 +606,14 @@ unittest // @schemaDefault on an enum field emits the member name
     assert(s.get("properties").get("mode").get("default").string_ == "slow");
 }
 
-unittest // unsupported types are rejected at compile time
+unittest  // unsupported types are rejected at compile time
 {
     assert(!__traits(compiles, jsonSchemaOf!(int*)));
     assert(!__traits(compiles, jsonSchemaOf!(void delegate())));
     assert(!__traits(compiles, jsonSchemaOf!(string[int])));
 }
 
-unittest // generated schemas validate instances via the validator
+unittest  // generated schemas validate instances via the validator
 {
     static struct Item
     {
@@ -628,7 +627,7 @@ unittest // generated schemas validate instances via the validator
     assert(!v.validate(parseJson(`{"a": {"name": "x", "qty": "no"}}`)).valid);
 }
 
-unittest // recursive generated schemas validate recursive instances
+unittest  // recursive generated schemas validate recursive instances
 {
     static struct Tree
     {
@@ -637,12 +636,11 @@ unittest // recursive generated schemas validate recursive instances
     }
 
     auto v = compileSchema(jsonSchemaOf!Tree);
-    assert(v.validate(parseJson(
-            `{"value": 1, "children": [{"value": 2, "children": []}]}`)).valid);
+    assert(v.validate(parseJson(`{"value": 1, "children": [{"value": 2, "children": []}]}`)).valid);
     assert(!v.validate(parseJson(`{"value": 1, "children": [{"children": []}]}`)).valid);
 }
 
-unittest // every generated schema conforms to the 2020-12 meta-schema
+unittest  // every generated schema conforms to the 2020-12 meta-schema
 {
     import std.sumtype : SumType;
     import std.datetime.systime : SysTime;
@@ -676,8 +674,7 @@ unittest // every generated schema conforms to the 2020-12 meta-schema
         {
             auto generated = jsonSchemaOf!T;
             auto r = meta.validate(generated);
-            assert(r.valid, T.stringof ~ " schema fails meta-validation: "
-                    ~ generated.toString);
+            assert(r.valid, T.stringof ~ " schema fails meta-validation: " ~ generated.toString);
             // And with the explicit $schema keyword at the root.
             auto withDialect = jsonSchemaOf!T(GeneratorSettings(true));
             assert(meta.validate(withDialect).valid);

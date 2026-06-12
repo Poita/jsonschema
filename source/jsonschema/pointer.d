@@ -126,7 +126,7 @@ const(JsonNode)* evaluatePointer(const(JsonNode)* doc, string[] tokens) pure not
     return cur;
 }
 
-unittest // parse the RFC 6901 example pointers
+unittest  // parse the RFC 6901 example pointers
 {
     string[] t;
     assert(parsePointer("", t) && t.length == 0);
@@ -138,7 +138,7 @@ unittest // parse the RFC 6901 example pointers
     assert(parsePointer("/m~0n", t) && t == ["m~n"]);
 }
 
-unittest // invalid pointers are rejected
+unittest  // invalid pointers are rejected
 {
     string[] t;
     assert(!parsePointer("foo", t));
@@ -146,7 +146,7 @@ unittest // invalid pointers are rejected
     assert(!parsePointer("/a~", t));
 }
 
-unittest // escapeToken round-trips
+unittest  // escapeToken round-trips
 {
     assert(escapeToken("a/b~c") == "a~1b~0c");
     string[] t;
@@ -154,7 +154,7 @@ unittest // escapeToken round-trips
     assert(escapeToken("plain") == "plain");
 }
 
-unittest // evaluatePointer walks objects and arrays
+unittest  // evaluatePointer walks objects and arrays
 {
     import jsonschema.node : parseJson;
 
@@ -173,7 +173,7 @@ unittest // evaluatePointer walks objects and arrays
     assert(evaluatePointer(doc, t).integer_ == 2);
 }
 
-unittest // evaluatePointer rejects bad array indices
+unittest  // evaluatePointer rejects bad array indices
 {
     import jsonschema.node : parseJson;
 

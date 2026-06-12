@@ -303,8 +303,7 @@ private bool numbersEqual(in JsonNode a, in JsonNode b) pure nothrow
 
     if (!isFinite(f) || f != floor(f))
         return false;
-    if (other.kind == K.integer)
-        // long.max + 1 as a double is exactly 2^63, so the boundary test is exact.
+    if (other.kind == K.integer) // long.max + 1 as a double is exactly 2^63, so the boundary test is exact.
         return f >= -9223372036854775808.0 && f < 9223372036854775808.0
             && cast(long) f == other.integer_;
     return f >= 0.0 && f < 18446744073709551616.0 && cast(ulong) f == other.uinteger_;
@@ -490,8 +489,8 @@ private string parseString(string s, ref size_t p) pure
                 p++;
                 uint cp = parseHex4(s, p);
                 // Combine a surrogate pair into one code point.
-                if (cp >= 0xD800 && cp <= 0xDBFF && p + 1 < s.length
-                        && s[p] == '\\' && s[p + 1] == 'u')
+                if (cp >= 0xD800 && cp <= 0xDBFF && p + 1 < s.length && s[p] == '\\'
+                        && s[p + 1] == 'u')
                 {
                     size_t save = p;
                     p += 2;
@@ -767,7 +766,7 @@ JSONValue toStdJson(in JsonNode n)
     }
 }
 
-unittest // parse scalars
+unittest  // parse scalars
 {
     assert(parseJson("null").isNull);
     assert(parseJson("true").boolean_ == true);
@@ -775,40 +774,40 @@ unittest // parse scalars
     assert(parseJson(`"hi"`).string_ == "hi");
 }
 
-unittest // parse integers stay exact (no double round-trip)
+unittest  // parse integers stay exact (no double round-trip)
 {
     auto n = parseJson("9223372036854775807");
     assert(n.kind == JsonNode.Kind.integer);
     assert(n.integer_ == long.max);
 }
 
-unittest // parse a ulong-range integer
+unittest  // parse a ulong-range integer
 {
     auto n = parseJson("18446744073709551615");
     assert(n.kind == JsonNode.Kind.uinteger);
     assert(n.uinteger_ == ulong.max);
 }
 
-unittest // an integer beyond ulong falls back to floating
+unittest  // an integer beyond ulong falls back to floating
 {
     auto n = parseJson("98249283749234923498293171823948729348710298301928331");
     assert(n.kind == JsonNode.Kind.floating);
 }
 
-unittest // parse floats
+unittest  // parse floats
 {
     auto n = parseJson("1.5e2");
     assert(n.kind == JsonNode.Kind.floating);
     assert(n.floating_ == 150.0);
 }
 
-unittest // parse negative numbers
+unittest  // parse negative numbers
 {
     assert(parseJson("-42").integer_ == -42);
     assert(parseJson("-1.5").floating_ == -1.5);
 }
 
-unittest // object member order is preserved
+unittest  // object member order is preserved
 {
     auto n = parseJson(`{"z":1,"a":2,"m":3}`);
     assert(n.members_.length == 3);
@@ -817,14 +816,14 @@ unittest // object member order is preserved
     assert(n.members_[2].key == "m");
 }
 
-unittest // duplicate object keys: last wins
+unittest  // duplicate object keys: last wins
 {
     auto n = parseJson(`{"a":1,"a":2}`);
     assert(n.members_.length == 1);
     assert(n.members_[0].value.integer_ == 2);
 }
 
-unittest // nested arrays and objects
+unittest  // nested arrays and objects
 {
     auto n = parseJson(`{"a":[1,{"b":null}],"c":{}}`);
     assert(n.get("a").array_.length == 2);
@@ -832,19 +831,19 @@ unittest // nested arrays and objects
     assert(n.get("c").isObject);
 }
 
-unittest // string escapes
+unittest  // string escapes
 {
     assert(parseJson(`"a\nb"`).string_ == "a\nb");
     assert(parseJson(`"A"`).string_ == "A");
     assert(parseJson(`"\""`).string_ == `"`);
 }
 
-unittest // surrogate pair escape decodes to one code point
+unittest  // surrogate pair escape decodes to one code point
 {
     assert(parseJson(`"😀"`).string_ == "\U0001F600");
 }
 
-unittest // parse errors throw
+unittest  // parse errors throw
 {
     import std.exception : assertThrown;
 
@@ -854,60 +853,60 @@ unittest // parse errors throw
     assertThrown!JsonParseException(parseJson("tru"));
 }
 
-unittest // trailing content rejected
+unittest  // trailing content rejected
 {
     import std.exception : assertThrown;
 
     assertThrown!JsonParseException(parseJson("1 2"));
 }
 
-unittest // jsonEquals: numbers compare across representations
+unittest  // jsonEquals: numbers compare across representations
 {
     assert(jsonEquals(JsonNode(1L), JsonNode(1.0)));
     assert(jsonEquals(JsonNode(1.0), JsonNode(1L)));
     assert(!jsonEquals(JsonNode(1L), JsonNode(1.5)));
 }
 
-unittest // jsonEquals: large integers compare exactly, not via double
+unittest  // jsonEquals: large integers compare exactly, not via double
 {
     // 2^53 and 2^53+1 collapse onto the same double; exact comparison must differ.
     assert(!jsonEquals(JsonNode(9007199254740993L), JsonNode(9007199254740992L)));
     assert(jsonEquals(JsonNode(9007199254740993L), JsonNode(9007199254740993L)));
 }
 
-unittest // jsonEquals: integral double equals the matching long beyond int range
+unittest  // jsonEquals: integral double equals the matching long beyond int range
 {
     assert(jsonEquals(JsonNode(1.0e15), JsonNode(1_000_000_000_000_000L)));
 }
 
-unittest // jsonEquals: objects ignore member order
+unittest  // jsonEquals: objects ignore member order
 {
     auto a = parseJson(`{"x":1,"y":2}`);
     auto b = parseJson(`{"y":2,"x":1}`);
     assert(jsonEquals(a, b));
 }
 
-unittest // jsonEquals: arrays are order-sensitive
+unittest  // jsonEquals: arrays are order-sensitive
 {
     assert(!jsonEquals(parseJson("[1,2]"), parseJson("[2,1]")));
     assert(jsonEquals(parseJson("[1,2]"), parseJson("[1,2]")));
 }
 
-unittest // jsonEquals: distinct kinds are unequal
+unittest  // jsonEquals: distinct kinds are unequal
 {
     assert(!jsonEquals(JsonNode(null), JsonNode(false)));
     assert(!jsonEquals(JsonNode("1"), JsonNode(1L)));
     assert(!jsonEquals(parseJson("[]"), parseJson("{}")));
 }
 
-unittest // round-trip through serialization
+unittest  // round-trip through serialization
 {
     const src = `{"a":[1,2.5,"x",null,true],"b":{"c":-7}}`;
     auto n = parseJson(src);
     assert(jsonEquals(parseJson(n.toString), n));
 }
 
-unittest // std.json round-trip preserves values
+unittest  // std.json round-trip preserves values
 {
     import std.json : parseJSON;
 
@@ -918,7 +917,7 @@ unittest // std.json round-trip preserves values
     assert(fromStdJson(back).jsonEquals(n));
 }
 
-unittest // set replaces in place, preserving order
+unittest  // set replaces in place, preserving order
 {
     auto n = parseJson(`{"a":1,"b":2}`);
     n.set("a", JsonNode(9L));

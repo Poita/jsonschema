@@ -496,8 +496,6 @@ bool isUri(string s, bool allowRelative) pure nothrow
         const c = s[i];
         if (c == '%')
         {
-            if (i + 2 >= s.length + 0 && true)
-                return false;
             if (i + 2 >= s.length || !isHex(s[i + 1]) || !isHex(s[i + 2]))
                 return false;
             i += 3;
@@ -763,8 +761,8 @@ private bool validTemplateExpr(string e) pure nothrow
     while (i < e.length)
     {
         const c = e[i];
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || isDigit(c) || c == '_'
-                || c == '.' || c == '%')
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || isDigit(c)
+                || c == '_' || c == '.' || c == '%')
         {
             inVar = true;
             i++;
@@ -780,7 +778,7 @@ private bool validTemplateExpr(string e) pure nothrow
         }
         if (c == '*')
         {
-            if (!inVar || i + 1 != e.length && e[i + 1] != ',')
+            if (!inVar || (i + 1 != e.length && e[i + 1] != ','))
                 return false;
             i++;
             continue;
@@ -802,7 +800,7 @@ private bool validTemplateExpr(string e) pure nothrow
     return inVar || e[$ - 1] == '*';
 }
 
-unittest // date
+unittest  // date
 {
     assert(isDate("1963-06-19"));
     assert(!isDate("1990-02-31"));
@@ -812,7 +810,7 @@ unittest // date
     assert(!isDate("2021-02-29"));
 }
 
-unittest // time
+unittest  // time
 {
     assert(isTime("08:30:06Z"));
     assert(isTime("08:30:06.283185Z"));
@@ -822,7 +820,7 @@ unittest // time
     assert(!isTime("08:60:06Z"));
 }
 
-unittest // time leap seconds
+unittest  // time leap seconds
 {
     assert(isTime("23:59:60Z"));
     assert(!isTime("22:59:60Z"));
@@ -830,7 +828,7 @@ unittest // time leap seconds
     assert(!isTime("15:59:60-07:00"));
 }
 
-unittest // date-time
+unittest  // date-time
 {
     assert(isDateTime("1963-06-19T08:30:06.283185Z"));
     assert(isDateTime("1963-06-19t08:30:06z"));
@@ -838,7 +836,7 @@ unittest // date-time
     assert(!isDateTime("06/19/1963 08:30:06 PST"));
 }
 
-unittest // duration
+unittest  // duration
 {
     assert(isDuration("P4DT12H30M5S"));
     assert(isDuration("P4Y"));
@@ -854,7 +852,7 @@ unittest // duration
     assert(!isDuration("P2S"));
 }
 
-unittest // email
+unittest  // email
 {
     assert(isEmail("joe.bloggs@example.com"));
     assert(isEmail("te~st@example.com"));
@@ -868,7 +866,7 @@ unittest // email
     assert(isEmail("te.st@[IPv6:::1]"));
 }
 
-unittest // hostname
+unittest  // hostname
 {
     assert(isHostname("www.example.com"));
     assert(isHostname("xn--4gbwdl.xn--wgbh1c"));
@@ -878,7 +876,7 @@ unittest // hostname
     assert(isHostname("abc"));
 }
 
-unittest // ipv4
+unittest  // ipv4
 {
     assert(isIpv4("192.168.0.1"));
     assert(!isIpv4("127.0.0.0.1"));
@@ -888,7 +886,7 @@ unittest // ipv4
     assert(!isIpv4("192.168.000.001")); // leading zeros
 }
 
-unittest // ipv6
+unittest  // ipv6
 {
     assert(isIpv6("::1"));
     assert(isIpv6("::"));
@@ -902,7 +900,7 @@ unittest // ipv6
     assert(!isIpv6("::laptop"));
 }
 
-unittest // uri and uri-reference
+unittest  // uri and uri-reference
 {
     assert(isUri("http://foo.bar/?baz=qux#quux", false));
     assert(isUri("urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66", false));
@@ -915,7 +913,7 @@ unittest // uri and uri-reference
     assert(isUri("http://[::1]/", false));
 }
 
-unittest // uuid
+unittest  // uuid
 {
     assert(isUuid("2EB8AA08-AA98-11EA-B4AA-73B441D16380"));
     assert(isUuid("2eb8aa08-aa98-11ea-b4aa-73b441d16380"));
@@ -923,13 +921,13 @@ unittest // uuid
     assert(!isUuid("2eb8aa08aa9811eab4aa73b441d16380"));
 }
 
-unittest // regex format
+unittest  // regex format
 {
     assert(isRegex("^a*$"));
     assert(!isRegex("^(abc]"));
 }
 
-unittest // json-pointer
+unittest  // json-pointer
 {
     assert(isJsonPointer(""));
     assert(isJsonPointer("/foo/bar~0/baz~1/%a"));
@@ -937,7 +935,7 @@ unittest // json-pointer
     assert(!isJsonPointer("foo"));
 }
 
-unittest // relative-json-pointer
+unittest  // relative-json-pointer
 {
     assert(isRelativeJsonPointer("1"));
     assert(isRelativeJsonPointer("0#"));
@@ -948,7 +946,7 @@ unittest // relative-json-pointer
     assert(!isRelativeJsonPointer(""));
 }
 
-unittest // uri-template
+unittest  // uri-template
 {
     assert(isUriTemplate("http://example.com/dictionary/{term:1}/{term}"));
     assert(!isUriTemplate("http://example.com/dictionary/{term:1}/{term"));
@@ -957,7 +955,7 @@ unittest // uri-template
     assert(isUriTemplate("{?list*}"));
 }
 
-unittest // unknown formats pass
+unittest  // unknown formats pass
 {
     assert(checkFormat("not-a-real-format", "anything"));
 }

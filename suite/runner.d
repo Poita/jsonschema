@@ -41,8 +41,7 @@ int main()
 {
     if (!exists(testsDir))
     {
-        writeln("test suite not found at ", testsDir,
-                " — run: git submodule update --init");
+        writeln("test suite not found at ", testsDir, " — run: git submodule update --init");
         return 2;
     }
 
@@ -115,18 +114,18 @@ int main()
     {
         writeln("--- failures ---");
         foreach (f; failures)
-            writefln("%s | %s | %s | expected=%s std=%s vibe=%s%s", f.file, f.group,
-                    f.test, f.expected, f.stdGot, f.vibeGot,
+            writefln("%s | %s | %s | expected=%s std=%s vibe=%s%s", f.file,
+                    f.group, f.test, f.expected, f.stdGot, f.vibeGot,
                     f.error.length ? " | " ~ f.error : "");
         writeln();
     }
 
     const reqTotal = reqPass + reqFail;
     const optTotal = optPass + optFail;
-    writefln("required: %d/%d passed (%.2f%%)", reqPass, reqTotal,
-            reqTotal ? 100.0 * reqPass / reqTotal : 0);
-    writefln("optional: %d/%d passed (%.2f%%)", optPass, optTotal,
-            optTotal ? 100.0 * optPass / optTotal : 0);
+    writefln("required: %d/%d passed (%.2f%%)", reqPass, reqTotal, reqTotal
+            ? 100.0 * reqPass / reqTotal : 0);
+    writefln("optional: %d/%d passed (%.2f%%)", optPass, optTotal, optTotal
+            ? 100.0 * optPass / optTotal : 0);
     writefln("skipped: %d (deliberate, see README)", skipped);
     writefln("adapter divergences: %d", divergences);
 
@@ -156,8 +155,8 @@ bool isDeliberateSkip(string rel, string group)
 
 /// Decide settings per file: format tests under optional/format/ run with
 /// assertion enabled; everything else uses the spec default (annotation).
-void runCase(string rel, string fileText, in JsonNode schemaNode, in JsonNode dataNode,
-        SchemaStore store, ref CaseResult r)
+void runCase(string rel, string fileText, in JsonNode schemaNode,
+        in JsonNode dataNode, SchemaStore store, ref CaseResult r)
 {
     ValidatorSettings settings;
     settings.store = store;

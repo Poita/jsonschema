@@ -191,8 +191,8 @@ Validator compileSchema(in Json doc, ValidatorSettings settings = ValidatorSetti
 /// Validate a `vibe.data.json.Json` instance against a compiled validator.
 /// (Free function because `Validator` lives in the base package; equivalent to
 /// `v.validateWith!VibeJsonAdapter(instance, format)`.)
-ValidationResult validateJson(Validator v, in Json instance,
-        OutputFormat format = OutputFormat.basic)
+ValidationResult validateJson(Validator v, in Json instance, OutputFormat format = OutputFormat
+        .basic)
 {
     return v.validateWith!VibeJsonAdapter(instance, format);
 }
@@ -208,7 +208,7 @@ version (unittest)
     import vibe.data.json : parseJsonString;
 }
 
-unittest // basic validation through the vibe adapter
+unittest  // basic validation through the vibe adapter
 {
     auto v = compileSchema(parseJsonString(
             `{"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]}`));
@@ -217,7 +217,7 @@ unittest // basic validation through the vibe adapter
     assert(!v.validateJson(parseJsonString(`{"a": "x"}`)).valid);
 }
 
-unittest // vibe bigInt keeps 64-bit fidelity (no double round-trip)
+unittest  // vibe bigInt keeps 64-bit fidelity (no double round-trip)
 {
     // 2^53 + 1 vs maximum 2^53: a double comparison would wrongly accept.
     auto v = compileSchema(parseJsonString(`{"maximum": 9007199254740992}`));
@@ -226,14 +226,14 @@ unittest // vibe bigInt keeps 64-bit fidelity (no double round-trip)
     assert(v.validateJson(parseJsonString("9007199254740992")).valid);
 }
 
-unittest // ulong-range bigInt values compare exactly
+unittest  // ulong-range bigInt values compare exactly
 {
     auto v = compileSchema(parseJsonString(`{"minimum": 18446744073709551615}`));
     assert(v.validateJson(parseJsonString("18446744073709551615")).valid);
     assert(!v.validateJson(parseJsonString("18446744073709551614")).valid);
 }
 
-unittest // integer/float distinction across the vibe representation
+unittest  // integer/float distinction across the vibe representation
 {
     auto v = compileSchema(parseJsonString(`{"type": "integer"}`));
     assert(v.validateJson(parseJsonString("3")).valid);
@@ -244,14 +244,14 @@ unittest // integer/float distinction across the vibe representation
     assert(!m.validateJson(parseJsonString("7")).valid);
 }
 
-unittest // const/enum equality across int_, bigInt and float_ representations
+unittest  // const/enum equality across int_, bigInt and float_ representations
 {
     auto v = compileSchema(parseJsonString(`{"const": 9007199254740993}`));
     assert(v.validateJson(parseJsonString("9007199254740993")).valid);
     assert(!v.validateJson(parseJsonString("9007199254740992")).valid);
 }
 
-unittest // round-trip vibe Json -> JsonNode -> vibe Json
+unittest  // round-trip vibe Json -> JsonNode -> vibe Json
 {
     import jsonschema.node : jsonEquals;
 
@@ -262,7 +262,7 @@ unittest // round-trip vibe Json -> JsonNode -> vibe Json
     assert(jsonEquals(vibeJsonToNode(back), n));
 }
 
-unittest // schema documents may be supplied as vibe Json (compile-time normalize)
+unittest  // schema documents may be supplied as vibe Json (compile-time normalize)
 {
     import jsonschema.ir : UnsupportedDialectException;
     import std.exception : assertThrown;
@@ -271,7 +271,7 @@ unittest // schema documents may be supplied as vibe Json (compile-time normaliz
             parseJsonString(`{"$schema": "http://json-schema.org/draft-04/schema#"}`)));
 }
 
-unittest // object key iteration order does not affect outcomes
+unittest  // object key iteration order does not affect outcomes
 {
     auto v = compileSchema(parseJsonString(
             `{"properties": {"a": {"type": "integer"}, "b": {"type": "string"}}, "additionalProperties": false}`));

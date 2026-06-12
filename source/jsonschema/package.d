@@ -35,14 +35,14 @@ version (unittest)
     }
 }
 
-unittest // boolean schemas
+unittest  // boolean schemas
 {
     assert(compileSchema(`true`).accepts(`{"anything": 1}`));
     assert(!compileSchema(`false`).accepts(`null`));
     assert(compileSchema(`{}`).accepts(`[1,2,3]`));
 }
 
-unittest // type keyword, including integer-valued floats
+unittest  // type keyword, including integer-valued floats
 {
     auto v = compileSchema(`{"type": "integer"}`);
     assert(v.accepts(`3`));
@@ -56,7 +56,7 @@ unittest // type keyword, including integer-valued floats
     assert(!multi.accepts(`0`));
 }
 
-unittest // const and enum with numeric cross-representation equality
+unittest  // const and enum with numeric cross-representation equality
 {
     auto v = compileSchema(`{"const": 1}`);
     assert(v.accepts(`1`));
@@ -72,7 +72,7 @@ unittest // const and enum with numeric cross-representation equality
     assert(!e.accepts(`[3,3]`));
 }
 
-unittest // numeric bounds are exact for 64-bit integers
+unittest  // numeric bounds are exact for 64-bit integers
 {
     auto v = compileSchema(`{"maximum": 9007199254740992}`);
     assert(v.accepts(`9007199254740992`));
@@ -80,7 +80,7 @@ unittest // numeric bounds are exact for 64-bit integers
     assert(!v.accepts(`9007199254740993`));
 }
 
-unittest // multipleOf with small decimal divisors
+unittest  // multipleOf with small decimal divisors
 {
     auto v = compileSchema(`{"multipleOf": 0.0001}`);
     assert(v.accepts(`0.0075`));
@@ -91,7 +91,7 @@ unittest // multipleOf with small decimal divisors
     assert(i.accepts(`4.0`));
 }
 
-unittest // string keywords count code points
+unittest  // string keywords count code points
 {
     auto v = compileSchema(`{"minLength": 2, "maxLength": 3}`);
     assert(v.accepts(`"ab"`));
@@ -101,7 +101,7 @@ unittest // string keywords count code points
     assert(v.accepts(`12`)); // non-strings ignore string keywords
 }
 
-unittest // pattern is a partial match
+unittest  // pattern is a partial match
 {
     auto v = compileSchema(`{"pattern": "b.t"}`);
     assert(v.accepts(`"abbattery"`));
@@ -109,7 +109,7 @@ unittest // pattern is a partial match
     assert(!v.accepts(`"ba"`));
 }
 
-unittest // properties / required / additionalProperties
+unittest  // properties / required / additionalProperties
 {
     auto v = compileSchema(`{
         "type": "object",
@@ -123,7 +123,7 @@ unittest // properties / required / additionalProperties
     assert(!v.accepts(`{"a": 1, "b": 2}`));
 }
 
-unittest // patternProperties and propertyNames
+unittest  // patternProperties and propertyNames
 {
     auto v = compileSchema(`{
         "patternProperties": {"^n_": {"type": "number"}},
@@ -134,7 +134,7 @@ unittest // patternProperties and propertyNames
     assert(!v.accepts(`{"toolongname": 1}`));
 }
 
-unittest // prefixItems and items
+unittest  // prefixItems and items
 {
     auto v = compileSchema(`{
         "prefixItems": [{"type": "integer"}, {"type": "string"}],
@@ -146,7 +146,7 @@ unittest // prefixItems and items
     assert(!v.accepts(`[1, "a", 3]`));
 }
 
-unittest // contains with minContains / maxContains
+unittest  // contains with minContains / maxContains
 {
     auto v = compileSchema(`{"contains": {"type": "integer"}, "minContains": 2, "maxContains": 3}`);
     assert(v.accepts(`[1, "x", 2]`));
@@ -154,7 +154,7 @@ unittest // contains with minContains / maxContains
     assert(!v.accepts(`[1, 2, 3, 4]`));
 }
 
-unittest // uniqueItems uses cross-representation number equality
+unittest  // uniqueItems uses cross-representation number equality
 {
     auto v = compileSchema(`{"uniqueItems": true}`);
     assert(v.accepts(`[1, 2, "1"]`));
@@ -162,7 +162,7 @@ unittest // uniqueItems uses cross-representation number equality
     assert(!v.accepts(`[{"a":1}, {"a":1.0}]`));
 }
 
-unittest // allOf / anyOf / oneOf / not
+unittest  // allOf / anyOf / oneOf / not
 {
     assert(compileSchema(`{"allOf": [{"minimum": 1}, {"maximum": 3}]}`).accepts(`2`));
     assert(!compileSchema(`{"allOf": [{"minimum": 1}, {"maximum": 3}]}`).accepts(`5`));
@@ -179,7 +179,7 @@ unittest // allOf / anyOf / oneOf / not
     assert(!compileSchema(`{"not": {"type": "string"}}`).accepts(`"s"`));
 }
 
-unittest // if / then / else
+unittest  // if / then / else
 {
     auto v = compileSchema(`{
         "if": {"type": "integer"},
@@ -192,7 +192,7 @@ unittest // if / then / else
     assert(!v.accepts(`true`));
 }
 
-unittest // dependentRequired and dependentSchemas
+unittest  // dependentRequired and dependentSchemas
 {
     auto v = compileSchema(`{
         "dependentRequired": {"credit_card": ["billing_address"]},
@@ -204,7 +204,7 @@ unittest // dependentRequired and dependentSchemas
     assert(!v.accepts(`{"name": "n", "age": "three"}`));
 }
 
-unittest // $ref to $defs and nested pointers
+unittest  // $ref to $defs and nested pointers
 {
     auto v = compileSchema(`{
         "$defs": {"positive": {"type": "integer", "minimum": 1}},
@@ -215,7 +215,7 @@ unittest // $ref to $defs and nested pointers
     assert(!v.accepts(`{"count": "x"}`));
 }
 
-unittest // $ref via $anchor and $id
+unittest  // $ref via $anchor and $id
 {
     auto v = compileSchema(`{
         "$id": "https://example.com/root",
@@ -226,7 +226,7 @@ unittest // $ref via $anchor and $id
     assert(!v.accepts(`{"first": 1}`));
 }
 
-unittest // recursive $ref
+unittest  // recursive $ref
 {
     auto v = compileSchema(`{
         "$id": "https://example.com/tree",
@@ -241,7 +241,7 @@ unittest // recursive $ref
     assert(!v.accepts(`{"value": 1, "children": [{"children": []}]}`));
 }
 
-unittest // external $ref through a pre-registered store
+unittest  // external $ref through a pre-registered store
 {
     auto store = new SchemaStore;
     store.register("https://example.com/name", `{"type": "string", "minLength": 1}`);
@@ -253,14 +253,14 @@ unittest // external $ref through a pre-registered store
     assert(!v.accepts(`{"n": 1}`));
 }
 
-unittest // unresolvable external $ref fails at compile time
+unittest  // unresolvable external $ref fails at compile time
 {
     import std.exception : assertThrown;
 
     assertThrown!SchemaCompileException(compileSchema(`{"$ref": "https://nowhere.invalid/x"}`));
 }
 
-unittest // unsupported dialect is rejected with a clear error
+unittest  // unsupported dialect is rejected with a clear error
 {
     import std.exception : assertThrown;
 
@@ -268,12 +268,12 @@ unittest // unsupported dialect is rejected with a clear error
             compileSchema(`{"$schema": "http://json-schema.org/draft-07/schema#"}`));
 }
 
-unittest // the default dialect (no $schema) is 2020-12
+unittest  // the default dialect (no $schema) is 2020-12
 {
     assert(compileSchema(`{"prefixItems": [{"type": "integer"}]}`).accepts(`[1]`));
 }
 
-unittest // unevaluatedProperties sees through allOf
+unittest  // unevaluatedProperties sees through allOf
 {
     auto v = compileSchema(`{
         "allOf": [{"properties": {"a": {"type": "integer"}}}],
@@ -284,7 +284,7 @@ unittest // unevaluatedProperties sees through allOf
     assert(!v.accepts(`{"a": 1, "c": 2}`));
 }
 
-unittest // unevaluatedProperties does not see into failed branches
+unittest  // unevaluatedProperties does not see into failed branches
 {
     auto v = compileSchema(`{
         "anyOf": [
@@ -300,7 +300,7 @@ unittest // unevaluatedProperties does not see into failed branches
     assert(!v.accepts(`{"c": 1}`));
 }
 
-unittest // unevaluatedItems with prefixItems across allOf
+unittest  // unevaluatedItems with prefixItems across allOf
 {
     auto v = compileSchema(`{
         "allOf": [{"prefixItems": [{"type": "integer"}]}],
@@ -310,7 +310,7 @@ unittest // unevaluatedItems with prefixItems across allOf
     assert(!v.accepts(`[1, 2]`));
 }
 
-unittest // format is an annotation by default and asserts in assertion mode
+unittest  // format is an annotation by default and asserts in assertion mode
 {
     auto lax = compileSchema(`{"format": "ipv4"}`);
     assert(lax.accepts(`"not an ip"`));
@@ -323,7 +323,7 @@ unittest // format is an annotation by default and asserts in assertion mode
     assert(strict.accepts(`12`)); // formats only constrain strings
 }
 
-unittest // basic output carries instance and keyword locations
+unittest  // basic output carries instance and keyword locations
 {
     auto v = compileSchema(`{"properties": {"a": {"items": {"type": "integer"}}}}`);
     auto r = v.validate(parseJSON(`{"a": [1, "x"]}`));
@@ -336,7 +336,7 @@ unittest // basic output carries instance and keyword locations
     assert(found);
 }
 
-unittest // flag output collects no errors
+unittest  // flag output collects no errors
 {
     auto v = compileSchema(`{"type": "string"}`);
     auto r = v.validate(parseJSON(`1`), OutputFormat.flag);
@@ -344,7 +344,7 @@ unittest // flag output collects no errors
     assert(r.errors.length == 0);
 }
 
-unittest // validating the 2020-12 meta-schema itself ($dynamicRef machinery)
+unittest  // validating the 2020-12 meta-schema itself ($dynamicRef machinery)
 {
     auto v = compileSchema(`{"$ref": "https://json-schema.org/draft/2020-12/schema"}`);
     assert(v.accepts(`{"type": "integer"}`));
@@ -353,7 +353,7 @@ unittest // validating the 2020-12 meta-schema itself ($dynamicRef machinery)
     assert(!v.accepts(`{"properties": {"a": 1}}`));
 }
 
-unittest // $dynamicRef resolves through the dynamic scope
+unittest  // $dynamicRef resolves through the dynamic scope
 {
     // The classic "list of T" example: the root re-declares the $dynamicAnchor,
     // so the generic list's $dynamicRef resolves to the outermost (string) type.
@@ -375,7 +375,7 @@ unittest // $dynamicRef resolves through the dynamic scope
     assert(!v.accepts(`[1]`));
 }
 
-unittest // instances can be JsonNode or JSONValue with identical results
+unittest  // instances can be JsonNode or JSONValue with identical results
 {
     auto v = compileSchema(`{"type": "object", "required": ["k"]}`);
     assert(v.validate(parseJson(`{"k": 1}`)).valid);
@@ -384,7 +384,7 @@ unittest // instances can be JsonNode or JSONValue with identical results
     assert(!v.validate(parseJSON(`{}`)).valid);
 }
 
-unittest // a deeply self-referential schema hits the depth guard, not a crash
+unittest  // a deeply self-referential schema hits the depth guard, not a crash
 {
     import std.exception : assertThrown;
 

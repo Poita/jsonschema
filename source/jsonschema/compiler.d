@@ -35,7 +35,8 @@ Validator compileSchema(string jsonText, ValidatorSettings settings = ValidatorS
 }
 
 /// Compile a schema given as a `std.json` value.
-Validator compileSchema(in std.json.JSONValue doc, ValidatorSettings settings = ValidatorSettings.init)
+Validator compileSchema(in std.json.JSONValue doc,
+        ValidatorSettings settings = ValidatorSettings.init)
 {
     return compileSchema(fromStdJson(doc), settings);
 }
@@ -189,8 +190,10 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
     if (n.isBoolean)
     {
         if (frames.length == 0)
-            frames = [Frame(newResource(sess, rootBase, dialect202012,
-                    vocabulariesFor(sess, sess.settings.defaultDialect), n), "")];
+            frames = [
+            Frame(newResource(sess, rootBase, dialect202012,
+                    vocabulariesFor(sess, sess.settings.defaultDialect), n), "")
+        ];
         auto s = new CompiledSchema;
         s.isBoolean = true;
         s.boolValue = n.boolean_;
@@ -198,8 +201,8 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
         return s;
     }
     if (!n.isObject)
-        throw new SchemaCompileException("schema must be an object or boolean"
-                ~ (frames.length ? " at " ~ frames[$ - 1].ptr : ""));
+        throw new SchemaCompileException("schema must be an object or boolean" ~ (
+                frames.length ? " at " ~ frames[$ - 1].ptr : ""));
 
     // Resource boundary: document root, or an object with `$id`.
     const idNode = n.get("$id");
@@ -282,8 +285,8 @@ private void registerSchema(Frame[] frames, CompiledSchema s) pure nothrow
 
 // --- keyword compilers (each returns true when it consumed the keyword) ---
 
-private bool compileCoreKeyword(Session sess, CompiledSchema s, SchemaResource res,
-        string key, in JsonNode val, Frame[] frames)
+private bool compileCoreKeyword(Session sess, CompiledSchema s,
+        SchemaResource res, string key, in JsonNode val, Frame[] frames)
 {
     switch (key)
     {
@@ -672,8 +675,8 @@ package auto compileRegex(string source, string keyword)
     try
         return regex(ecmaShorthand(source));
     catch (RegexException e)
-        throw new SchemaCompileException("invalid " ~ keyword ~ " regular expression '"
-                ~ source ~ "': " ~ e.msg);
+        throw new SchemaCompileException(
+                "invalid " ~ keyword ~ " regular expression '" ~ source ~ "': " ~ e.msg);
 }
 
 // ECMA-262 whitespace: TAB-CR, SP, NBSP, ZWNBSP, and the Unicode Zs / line
@@ -782,7 +785,8 @@ private void resolveRef(Session sess, SchemaRef r)
         const decoded = percentDecode(frag);
         string[] tokens;
         if (!parsePointer(decoded, tokens))
-            throw new SchemaCompileException("invalid JSON Pointer fragment in $ref: " ~ r.targetUri);
+            throw new SchemaCompileException("invalid JSON Pointer fragment in $ref: " ~ r
+                    .targetUri);
         target = lookupPointer(sess, res, tokens);
         if (target is null)
             throw new SchemaCompileException("$ref target not found: " ~ r.targetUri);
@@ -836,7 +840,6 @@ private SchemaResource findResource(Session sess, string base)
         sess.store.register(base, doc);
         return compileDocument(sess, doc, base);
     }
-    throw new SchemaCompileException(
-            "unresolvable reference to '" ~ base ~ "' (schema not registered; "
-            ~ "register it in the SchemaStore or supply a resolver)");
+    throw new SchemaCompileException("unresolvable reference to '" ~ base
+            ~ "' (schema not registered; " ~ "register it in the SchemaStore or supply a resolver)");
 }

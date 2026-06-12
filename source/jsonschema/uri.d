@@ -228,7 +228,7 @@ string percentDecode(string s) pure nothrow
     size_t i = 0;
     while (i < s.length)
     {
-        if (s[i] == '%' && i + 2 < s.length + 0 && i + 2 < s.length)
+        if (s[i] == '%' && i + 2 < s.length)
         {
             const h = hexVal(s[i + 1]);
             const l = hexVal(s[i + 2]);
@@ -256,7 +256,7 @@ private int hexVal(char c) pure nothrow
     return -1;
 }
 
-unittest // parse an absolute URI with all components
+unittest  // parse an absolute URI with all components
 {
     auto u = parseUri("https://example.com/a/b?q=1#frag");
     assert(u.scheme == "https");
@@ -266,7 +266,7 @@ unittest // parse an absolute URI with all components
     assert(u.hasFragment && u.fragment == "frag");
 }
 
-unittest // parse a relative reference
+unittest  // parse a relative reference
 {
     auto u = parseUri("../x/y");
     assert(u.scheme == "");
@@ -274,21 +274,21 @@ unittest // parse a relative reference
     assert(u.path == "../x/y");
 }
 
-unittest // a colon inside the path does not create a scheme when prefix is invalid
+unittest  // a colon inside the path does not create a scheme when prefix is invalid
 {
     auto u = parseUri("./a:b");
     assert(u.scheme == "");
     assert(u.path == "./a:b");
 }
 
-unittest // urn parses as scheme + opaque path
+unittest  // urn parses as scheme + opaque path
 {
     auto u = parseUri("urn:uuid:deadbeef-1234-ffff-ffff-4321feebdaed");
     assert(u.scheme == "urn");
     assert(u.path == "uuid:deadbeef-1234-ffff-ffff-4321feebdaed");
 }
 
-unittest // resolveUri: RFC 3986 §5.4.1 normal examples
+unittest  // resolveUri: RFC 3986 §5.4.1 normal examples
 {
     const base = "http://a/b/c/d;p?q";
     assert(resolveUri(base, "g") == "http://a/b/c/g");
@@ -309,7 +309,7 @@ unittest // resolveUri: RFC 3986 §5.4.1 normal examples
     assert(resolveUri(base, "../../g") == "http://a/g");
 }
 
-unittest // resolveUri: RFC 3986 §5.4.2 abnormal examples
+unittest  // resolveUri: RFC 3986 §5.4.2 abnormal examples
 {
     const base = "http://a/b/c/d;p?q";
     assert(resolveUri(base, "../../../g") == "http://a/g");
@@ -329,17 +329,17 @@ unittest // resolveUri: RFC 3986 §5.4.2 abnormal examples
     assert(resolveUri(base, "http:g") == "http:g");
 }
 
-unittest // resolveUri against a urn base keeps the urn for fragment-only refs
+unittest  // resolveUri against a urn base keeps the urn for fragment-only refs
 {
     assert(resolveUri("urn:uuid:dead-beef", "#frag") == "urn:uuid:dead-beef#frag");
 }
 
-unittest // resolveUri with an absolute reference ignores the base
+unittest  // resolveUri with an absolute reference ignores the base
 {
     assert(resolveUri("http://a/b", "https://x/y#f") == "https://x/y#f");
 }
 
-unittest // splitFragment
+unittest  // splitFragment
 {
     string b, f;
     splitFragment("http://a/b#/c/d", b, f);
@@ -350,7 +350,7 @@ unittest // splitFragment
     assert(b == "" && f == "anchor");
 }
 
-unittest // percentDecode
+unittest  // percentDecode
 {
     assert(percentDecode("a%20b") == "a b");
     assert(percentDecode("%7Euser") == "~user");

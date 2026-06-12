@@ -163,7 +163,7 @@ package bool evalSchema(A)(CompiledSchema s, in A.Value v, string ip, string kp,
     }
 
     bool pushed;
-    if (s.resource !is null && (st.dynStack.length == 0 || st.dynStack[$ - 1] !is s.resource))
+    if (s.resource !is null && (st.dynStack.length == 0 || st.dynStack[$ - 1]!is s.resource))
     {
         st.dynStack ~= s.resource;
         pushed = true;
@@ -354,7 +354,7 @@ package bool evalSchema(A)(CompiledSchema s, in A.Value v, string ip, string kp,
                 return 0;
             Evaluated se;
             if (evalSchema!A(s.unevaluatedProperties, member,
-                    ip ~ "/" ~ escapeToken(key), kp ~ "/unevaluatedProperties", st, se))
+                ip ~ "/" ~ escapeToken(key), kp ~ "/unevaluatedProperties", st, se))
                 ev.markProp(key);
             else
                 failed = true;
@@ -430,8 +430,8 @@ private bool typeMatches(A)(ubyte mask, in A.Value v, JsonKind kind)
     }
 }
 
-private bool checkNumber(A)(CompiledSchema s, in JsonNumber n, string ip, string kp,
-        ref EvalState!A st)
+private bool checkNumber(A)(CompiledSchema s, in JsonNumber n, string ip,
+        string kp, ref EvalState!A st)
 {
     bool ok = true;
     if (s.hasMultipleOf && !isMultipleOf(n, s.multipleOf))
@@ -462,8 +462,7 @@ private bool checkNumber(A)(CompiledSchema s, in JsonNumber n, string ip, string
     return ok;
 }
 
-private bool checkString(A)(CompiledSchema s, string str, string ip, string kp,
-        ref EvalState!A st)
+private bool checkString(A)(CompiledSchema s, string str, string ip, string kp, ref EvalState!A st)
 {
     bool ok = true;
     if (s.maxLength != absent || s.minLength != absent)
@@ -488,8 +487,7 @@ private bool checkString(A)(CompiledSchema s, string str, string ip, string kp,
 
         if (matchFirst(str, s.pattern).empty)
         {
-            fail(st, ip, kp ~ "/pattern", "string does not match pattern '"
-                    ~ s.patternSource ~ "'");
+            fail(st, ip, kp ~ "/pattern", "string does not match pattern '" ~ s.patternSource ~ "'");
             ok = false;
         }
     }
@@ -523,8 +521,8 @@ private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp
             foreach (name; names)
                 if (A.objectGet(v, name) is null)
                 {
-                    fail(st, ip, kp ~ "/dependentRequired", "property '" ~ trigger
-                            ~ "' requires property '" ~ name ~ "'");
+                    fail(st, ip, kp ~ "/dependentRequired",
+                            "property '" ~ trigger ~ "' requires property '" ~ name ~ "'");
                     ok = false;
                 }
     foreach (trigger, sub; s.dependentSchemas)
@@ -537,8 +535,8 @@ private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp
                 ok = false;
         }
 
-    if (s.properties.length || s.patternProperties.length || s.additionalProperties !is null
-            || s.propertyNames !is null)
+    if (s.properties.length || s.patternProperties.length
+            || s.additionalProperties !is null || s.propertyNames !is null)
     {
         import std.regex : matchFirst;
 
@@ -560,7 +558,7 @@ private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp
                 {
                     Evaluated se;
                     if (evalSchema!A(pp.schema, member, mp,
-                            kp ~ "/patternProperties/" ~ escapeToken(pp.source), st, se))
+                        kp ~ "/patternProperties/" ~ escapeToken(pp.source), st, se))
                         ev.markProp(key);
                     else
                         failed = true;
@@ -570,7 +568,7 @@ private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp
             {
                 Evaluated se;
                 if (evalSchema!A(s.additionalProperties, member, mp,
-                        kp ~ "/additionalProperties", st, se))
+                    kp ~ "/additionalProperties", st, se))
                     ev.markProp(key);
                 else
                     failed = true;
@@ -665,7 +663,8 @@ private bool checkArray(A)(CompiledSchema s, in A.Value v, string ip, string kp,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.containsSchema, elem, ip ~ "/" ~ i.to!string, kp ~ "/contains", st, se))
+            if (evalSchema!A(s.containsSchema, elem, ip ~ "/" ~ i.to!string,
+                    kp ~ "/contains", st, se))
                 matchedIdx ~= i;
         }
         const minC = s.minContains != absent ? s.minContains : 1;
@@ -682,7 +681,8 @@ private bool checkArray(A)(CompiledSchema s, in A.Value v, string ip, string kp,
             shrinkErrors(st, mark); // non-matching items are not failures
         if (s.maxContains != absent && cast(long) matchedIdx.length > s.maxContains)
         {
-            fail(st, ip, kp ~ "/maxContains", "array contains more matching items than maxContains");
+            fail(st, ip, kp ~ "/maxContains",
+                    "array contains more matching items than maxContains");
             groupOk = false;
         }
         if (groupOk)
@@ -812,7 +812,8 @@ package bool valueEqualsNode(A)(in A.Value v, in JsonNode n, JsonKind kind)
         return n.kind == K.boolean && A.getBoolean(v) == n.boolean_;
     case JsonKind.integer:
     case JsonKind.floating:
-        return n.isNumber && cmpNumbers(A.getNumber(v), numberOfNode(n)) == 0;
+        return n.isNumber
+            && cmpNumbers(A.getNumber(v), numberOfNode(n)) == 0;
     case JsonKind.string_:
         return n.kind == K.string_ && A.getString(v) == n.string_;
     case JsonKind.array:
