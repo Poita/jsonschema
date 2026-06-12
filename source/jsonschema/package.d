@@ -11,7 +11,9 @@ module jsonschema;
 
 public import jsonschema.adapter : isJsonAdapter, JsonKind, JsonNumber,
     JsonNodeAdapter, StdJsonAdapter;
+public import jsonschema.attributes;
 public import jsonschema.compiler : compileSchema;
+public import jsonschema.generate : GeneratorSettings, jsonSchemaOf;
 public import jsonschema.ir : dialect202012, FormatMode, OutputFormat,
     SchemaCompileException, SchemaException, SchemaResolver,
     UnsupportedDialectException, ValidationError, ValidationException,
