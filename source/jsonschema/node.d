@@ -199,6 +199,31 @@ struct JsonNode
         }
     }
 
+    /// Deep copy (the arrays backing objects and arrays are duplicated).
+    JsonNode clone() const pure nothrow
+    {
+        JsonNode n;
+        n.kind = kind;
+        n.boolean_ = boolean_;
+        n.integer_ = integer_;
+        n.uinteger_ = uinteger_;
+        n.floating_ = floating_;
+        n.string_ = string_;
+        if (kind == Kind.array)
+        {
+            n.array_ = new JsonNode[](array_.length);
+            foreach (i, ref e; array_)
+                n.array_[i] = e.clone;
+        }
+        else if (kind == Kind.object)
+        {
+            n.members_ = new Member[](members_.length);
+            foreach (i, ref m; members_)
+                n.members_[i] = Member(m.key, m.value.clone);
+        }
+        return n;
+    }
+
     string toString() const pure
     {
         auto app = appender();

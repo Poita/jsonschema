@@ -15,6 +15,10 @@
 ///     // zero fractional part" rule).
 ///     static JsonKind kindOf(in Value v);
 ///
+///     // Wrap a string as a Value (used by propertyNames, which validates
+///     // object keys as string instances).
+///     static Value ofString(string s);
+///
 ///     // Scalar extraction; only called when kindOf reports the matching kind.
 ///     static bool getBoolean(in Value v);
 ///     static JsonNumber getNumber(in Value v);    // for integer and floating
@@ -123,6 +127,7 @@ template isJsonAdapter(A)
 {
     enum isJsonAdapter = is(A.Value) && __traits(compiles, (in A.Value v) {
             JsonKind k = A.kindOf(v);
+            A.Value w = A.ofString("key");
             bool b = A.getBoolean(v);
             JsonNumber n = A.getNumber(v);
             string s = A.getString(v);
@@ -138,6 +143,11 @@ template isJsonAdapter(A)
 struct StdJsonAdapter
 {
     alias Value = JSONValue;
+
+    static Value ofString(string s)
+    {
+        return JSONValue(s);
+    }
 
     static JsonKind kindOf(in Value v)
     {
@@ -223,6 +233,11 @@ static assert(isJsonAdapter!StdJsonAdapter);
 struct JsonNodeAdapter
 {
     alias Value = JsonNode;
+
+    static Value ofString(string s) pure nothrow
+    {
+        return JsonNode(s);
+    }
 
     static JsonKind kindOf(in Value v) pure nothrow
     {
