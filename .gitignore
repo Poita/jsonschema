@@ -11,3 +11,4 @@ docs.json
 /jsonschema-test-*
 /suite-runner
 dub.selections.json
+/.claude/
