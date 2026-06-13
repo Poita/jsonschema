@@ -6,6 +6,7 @@ lcov.info
 __test__*__
 __dummy.html
 docs.json
+/docs/
 /libjsonschema*.a
 /jsonschema-vibe-test-library
 /jsonschema-test-library
