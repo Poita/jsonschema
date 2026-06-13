@@ -26,3 +26,14 @@ subPackage {
 	dependency "jsonschema" path="."
 	dependency "jsonschema:vibe" path="."
 }
+
+subPackage {
+	name "bench-runner"
+	description "Performance harness: in-process microbench over bench/workloads through both adapters"
+	targetType "executable"
+	targetName "bench-runner"
+	sourcePaths "bench"
+	importPaths "bench"
+	dependency "jsonschema" path="."
+	dependency "jsonschema:vibe" path="."
+}

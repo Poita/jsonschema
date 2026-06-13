@@ -1,0 +1,10 @@
+{
+  "orderId": "ORD-123",
+  "buyer": { "name": "" },
+  "seller": { "name": "X", "billing": { "street": "a", "city": "b", "country": "USA" } },
+  "items": [
+    { "sku": "bad-sku", "qty": 0, "price": { "amount": -5, "currency": "BTC" } }
+  ],
+  "total": { "amount": 10, "currency": "USD", "extra": true },
+  "status": "pending"
+}

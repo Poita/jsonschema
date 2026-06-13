@@ -1,0 +1,10 @@
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "created": "2026-06-13T09:30:00Z",
+  "due": "2026-07-01",
+  "contact": "ops@example.com",
+  "homepage": "https://example.com/path?q=1",
+  "ip": "192.168.1.1",
+  "ip6": "2001:db8::8a2e:370:7334",
+  "host": "api.example.com"
+}

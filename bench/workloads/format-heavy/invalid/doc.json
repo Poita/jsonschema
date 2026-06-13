@@ -1,0 +1,10 @@
+{
+  "id": "not-a-uuid",
+  "created": "13/06/2026 9:30am",
+  "due": "2026-13-40",
+  "contact": "ops@@example",
+  "homepage": "://broken",
+  "ip": "999.1.1.1",
+  "ip6": "2001:db8:::1",
+  "host": "-bad-.host."
+}

@@ -12,5 +12,7 @@ docs.json
 /jsonschema-test-library
 /jsonschema-test-*
 /suite-runner
+/bench-runner
+/bench/baseline.local.json
 dub.selections.json
 /.claude/

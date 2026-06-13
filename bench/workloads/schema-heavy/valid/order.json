@@ -1,0 +1,20 @@
+{
+  "orderId": "ORD-00012345",
+  "buyer": {
+    "name": "Grace Hopper",
+    "billing": { "street": "1 Navy Way", "city": "Arlington", "country": "US", "postcode": "22202" },
+    "shipping": { "street": "1 Navy Way", "city": "Arlington", "country": "US" }
+  },
+  "seller": { "name": "Compiler Works Pty Ltd" },
+  "items": [
+    { "sku": "CPU-001234", "qty": 2, "price": { "amount": 199.99, "currency": "USD" } },
+    {
+      "sku": "RAM-9876",
+      "qty": 8,
+      "price": { "amount": 59.5, "currency": "USD" },
+      "discount": { "amount": 5, "currency": "USD" }
+    }
+  ],
+  "total": { "amount": 875.98, "currency": "USD" },
+  "status": "placed"
+}
