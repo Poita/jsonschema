@@ -90,6 +90,12 @@ assert(validator.validateJson(parseJsonString("42")).valid);          // vibe Js
 assert(validator.validate(std.json.parseJSON("42")).valid);           // std.json
 ```
 
+`vibe.data.json.Json` instances must use the `validateJson` free function (or
+`validateWith!VibeJsonAdapter`), not `Validator.validate`/`isValid`. The base
+package stays free of vibe-d, so `Validator` has no `Json` member overload;
+calling `validate`/`isValid` with a vibe `Json` fails to compile with a message
+pointing at `validateJson`.
+
 ### Settings
 
 ```d
