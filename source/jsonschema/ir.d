@@ -12,9 +12,24 @@ import std.regex : Regex;
 
 @safe:
 
-/// URI of the JSON Schema 2020-12 dialect (the default and currently the only
-/// fully supported dialect).
+/// URI of the JSON Schema 2020-12 dialect (the default dialect).
 enum dialect202012 = "https://json-schema.org/draft/2020-12/schema";
+/// URI of the JSON Schema 2019-09 dialect.
+enum dialect201909 = "https://json-schema.org/draft/2019-09/schema";
+/// URI of the JSON Schema draft-07 dialect (note: `http`, trailing `#`).
+enum dialect07 = "http://json-schema.org/draft-07/schema#";
+
+/// Which JSON Schema draft a resource is processed under. Drafts differ in a
+/// handful of keyword semantics (`$ref` exclusivity, `items`/`additionalItems`
+/// vs `prefixItems`, `$recursiveRef` vs `$dynamicRef`, …); the resource's draft
+/// drives those choices at compile time. Values are ordered oldest → newest so
+/// `draft <= Draft.draft2019_09` reads naturally.
+enum Draft : ubyte
+{
+    draft07 = 7,
+    draft2019_09 = 19,
+    draft2020_12 = 20,
+}
 
 /// Base class for all schema compilation problems.
 class SchemaException : Exception
@@ -138,7 +153,8 @@ struct ValidatorSettings
     FormatMode formatMode = FormatMode.annotation;
 
     /// Pre-registered schema store consulted for `$ref` targets. When null a
-    /// fresh store (containing only the bundled 2020-12 meta-schemas) is used.
+    /// fresh store (containing the bundled 2020-12 / 2019-09 / draft-07
+    /// meta-schemas) is used.
     SchemaStore store;
 
     /// Optional loader for unknown remote schema URIs. Null (the default)
@@ -173,6 +189,8 @@ final class SchemaResource
     CompiledSchema[string] byPointer;
     /// Dialect in effect for this resource.
     string dialectUri;
+    /// Draft family the dialect belongs to; drives per-draft keyword semantics.
+    Draft draft = Draft.draft2020_12;
     Vocabularies vocab;
     /// The raw document node this resource was compiled from; kept so `$ref`
     /// pointer fragments can target locations outside known keyword positions.
@@ -186,9 +204,13 @@ final class SchemaRef
     string targetUri;
     /// Statically resolved target.
     CompiledSchema target;
-    /// True for `$dynamicRef`.
+    /// True for `$dynamicRef` and `$recursiveRef`.
     bool dynamic;
-    /// Plain-name fragment of a `$dynamicRef`, when present.
+    /// True for `$recursiveRef` (the 2019-09 predecessor of `$dynamicRef`,
+    /// resolved against `$recursiveAnchor` rather than a named anchor).
+    bool recursive;
+    /// Plain-name fragment of a `$dynamicRef`, when present. The empty string
+    /// is used as the implicit anchor name of a `$recursiveRef`.
     string anchorName;
     /// True when the initially resolved target is a matching `$dynamicAnchor`,
     /// i.e. the reference participates in dynamic-scope resolution.
@@ -233,7 +255,10 @@ final class CompiledSchema
 
     // --- core ---
     SchemaRef refInfo; /// `$ref`, or null
-    SchemaRef dynRefInfo; /// `$dynamicRef`, or null
+    /// In drafts up to draft-07, a `$ref` suppresses every sibling keyword;
+    /// set when `refInfo` is present and the resource's draft is <= draft-07.
+    bool refIsExclusive;
+    SchemaRef dynRefInfo; /// `$dynamicRef` / `$recursiveRef`, or null
     bool hasDynamicAnchor;
     string dynamicAnchorName;
 
@@ -295,6 +320,9 @@ final class CompiledSchema
     bool hasPrefixItems;
     CompiledSchema[] prefixItems;
     CompiledSchema itemsSchema;
+    /// Pre-2020-12 `additionalItems`: applies to items beyond a tuple `items`
+    /// (modelled here via `prefixItems`). Only consulted when `hasPrefixItems`.
+    CompiledSchema additionalItemsSchema;
     CompiledSchema containsSchema;
 
     // --- unevaluated ---

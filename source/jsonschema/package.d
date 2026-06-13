@@ -264,13 +264,49 @@ unittest  // unsupported dialect is rejected with a clear error
 {
     import std.exception : assertThrown;
 
+    // draft-04 is not implemented (and its meta-schema is not bundled).
     assertThrown!UnsupportedDialectException(
-            compileSchema(`{"$schema": "http://json-schema.org/draft-07/schema#"}`));
+            compileSchema(`{"$schema": "http://json-schema.org/draft-04/schema#"}`));
 }
 
 unittest  // the default dialect (no $schema) is 2020-12
 {
     assert(compileSchema(`{"prefixItems": [{"type": "integer"}]}`).accepts(`[1]`));
+}
+
+unittest  // draft-07: array `items` is a tuple, and `$ref` suppresses siblings
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "items": [{"type": "integer"}, {"type": "string"}]
+    }`);
+    assert(v.accepts(`[1, "x"]`));
+    assert(!v.accepts(`["x", "y"]`));
+    assert(v.accepts(`[1, "x", true]`)); // beyond the tuple: unconstrained
+
+    // `prefixItems` is not a draft-07 keyword: it must be ignored.
+    auto ignored = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "prefixItems": [{"type": "string"}]
+    }`);
+    assert(ignored.accepts(`[1, 2, 3]`));
+}
+
+unittest  // draft 2019-09: $recursiveRef / $recursiveAnchor resolve dynamically
+{
+    auto v = compileSchema(`{
+        "$schema": "https://json-schema.org/draft/2019-09/schema",
+        "$id": "https://example.com/tree",
+        "$recursiveAnchor": true,
+        "type": "object",
+        "properties": {
+            "data": true,
+            "children": {"type": "array", "items": {"$recursiveRef": "#"}}
+        },
+        "additionalProperties": false
+    }`);
+    assert(v.accepts(`{"data": 1, "children": [{"data": 2}]}`));
+    assert(!v.accepts(`{"data": 1, "children": [{"bogus": 2}]}`));
 }
 
 unittest  // unevaluatedProperties sees through allOf

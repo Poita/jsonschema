@@ -3,9 +3,10 @@
 /// `$ref` resolution is local-only by default: external references resolve
 /// against documents registered here (keyed by absolute URI, usually the
 /// document's `$id`), and compilation fails for anything unknown. The bundled
-/// JSON Schema 2020-12 meta-schemas are registered in every store. Callers who
-/// want remote loading supply `ValidatorSettings.resolver` — the library never
-/// performs network I/O on its own.
+/// JSON Schema 2020-12, 2019-09, and draft-07 meta-schemas are registered in
+/// every store. Callers who want remote loading supply
+/// `ValidatorSettings.resolver` — the library never performs network I/O on its
+/// own.
 module jsonschema.store;
 
 import jsonschema.node : JsonNode, fromStdJson, parseJson;
@@ -68,6 +69,28 @@ final class SchemaStore
         register("https://json-schema.org/draft/2020-12/meta/content", import("meta/content.json"));
         register("https://json-schema.org/draft/2020-12/meta/meta-data",
                 import("meta/meta-data.json"));
+
+        // Draft 2019-09 (main schema plus its six vocabulary meta-schemas).
+        register("https://json-schema.org/draft/2019-09/schema",
+                import("draft2019-09/schema.json"));
+        register("https://json-schema.org/draft/2019-09/meta/core",
+                import("draft2019-09/meta/core.json"));
+        register("https://json-schema.org/draft/2019-09/meta/applicator",
+                import("draft2019-09/meta/applicator.json"));
+        register("https://json-schema.org/draft/2019-09/meta/validation",
+                import("draft2019-09/meta/validation.json"));
+        register("https://json-schema.org/draft/2019-09/meta/meta-data",
+                import("draft2019-09/meta/meta-data.json"));
+        register("https://json-schema.org/draft/2019-09/meta/format",
+                import("draft2019-09/meta/format.json"));
+        register("https://json-schema.org/draft/2019-09/meta/content",
+                import("draft2019-09/meta/content.json"));
+
+        // Draft-07 (a single self-contained meta-schema; no vocabularies).
+        register("http://json-schema.org/draft-07/schema#",
+                import("draft-07/schema.json"));
+        register("http://json-schema.org/draft-07/schema",
+                import("draft-07/schema.json"));
     }
 }
 
@@ -77,6 +100,9 @@ unittest  // a fresh store carries the bundled meta-schemas
     assert(store.contains("https://json-schema.org/draft/2020-12/schema"));
     assert(store.contains("https://json-schema.org/draft/2020-12/meta/core"));
     assert(store.contains("https://json-schema.org/draft/2020-12/meta/format-annotation"));
+    assert(store.contains("https://json-schema.org/draft/2019-09/schema"));
+    assert(store.contains("https://json-schema.org/draft/2019-09/meta/applicator"));
+    assert(store.contains("http://json-schema.org/draft-07/schema#"));
 }
 
 unittest  // register from text and from std.json
