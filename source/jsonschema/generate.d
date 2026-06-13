@@ -891,6 +891,19 @@ unittest  // fractional bounds still emit as floating-point numbers
     assert(x.get("maximum").floating_ == 99.5);
 }
 
+unittest  // @description alias emits the description keyword
+{
+    import jsonschema.attributes : description;
+
+    static struct Doc
+    {
+        @description("a documented field") int x;
+    }
+
+    auto s = jsonSchemaOf!Doc;
+    assert(s.get("properties").get("x").get("description").string_ == "a documented field");
+}
+
 unittest  // fields with declared defaults are optional
 {
     static struct Options

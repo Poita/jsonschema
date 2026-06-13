@@ -12,6 +12,10 @@ struct fieldDescription
     string value;
 }
 
+/// `@description` alias for `@fieldDescription`, matching the JSON Schema
+/// keyword name for discoverability. Both emit the `description` keyword.
+alias description = fieldDescription;
+
 /// Emits the JSON Schema `title` keyword.
 struct title
 {
