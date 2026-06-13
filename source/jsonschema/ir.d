@@ -93,6 +93,20 @@ struct ValidationResult
 {
     bool valid;
     ValidationError[] errors;
+
+    /// Render the errors as a single string, one per line, each formatted as
+    /// `instanceLocation ~ " " ~ keywordLocation ~ ": " ~ message`. Returns the
+    /// empty string when the instance is valid.
+    string toString() const @safe pure
+    {
+        if (valid)
+            return "";
+        import std.algorithm : map;
+        import std.array : join;
+
+        return errors.map!(e => e.instanceLocation ~ " " ~ e.keywordLocation ~ ": " ~ e.message)
+            .join("\n");
+    }
 }
 
 /// The set of 2020-12 vocabularies in effect for a schema resource. Keywords
@@ -293,4 +307,26 @@ final class CompiledSchema
     string contentEncoding;
     string contentMediaType;
     CompiledSchema contentSchema;
+}
+
+// --- tests ---
+
+unittest  // ValidationResult.toString: empty when valid
+{
+    const ok = ValidationResult(true, null);
+    assert(ok.toString == "");
+}
+
+unittest  // ValidationResult.toString: one line per error
+{
+    const r = ValidationResult(false, [
+        ValidationError("/age", "/properties/age/minimum", "instance is below the minimum"),
+        ValidationError("", "/required", "missing required property 'name'"),
+    ]);
+    const text = r.toString;
+    assert(text == "/age /properties/age/minimum: instance is below the minimum\n"
+            ~ " /required: missing required property 'name'");
+    import std.string : splitLines;
+
+    assert(text.splitLines.length == 2);
 }
