@@ -409,3 +409,28 @@ unittest  // applyUdaFacets is public: external callers fold facets onto non-fie
     assert(prop.get("minimum").integer_ == 0);
     assert(prop.get("maximum").integer_ == 100);
 }
+
+unittest  // one Validator validates many instances with independent results
+{
+    auto v = compileSchema(`{"type": "integer", "minimum": 0}`);
+
+    assert(v.validate(parseJson(`5`)).valid);
+    const bad = v.validate(parseJson(`-1`));
+    assert(!bad.valid);
+    // A prior failing call leaves no residue: the same instance still passes,
+    // and a repeated failure reports the same number of errors (no accumulation).
+    assert(v.validate(parseJson(`5`)).valid);
+    assert(v.validate(parseJson(`-1`)).errors.length == bad.errors.length);
+    assert(v.validate(parseJson(`7`)).errors.length == 0);
+}
+
+unittest  // validation works through a const Validator reference (shared read-only)
+{
+    const Validator v = compileSchema(`{"type": "string", "minLength": 1}`);
+
+    assert(v.validate(parseJson(`"x"`)).valid);
+    assert(!v.validate(parseJson(`1`)).valid);
+    assert(v.validate(parseJSON(`"y"`)).valid);
+    assert(v.isValid(parseJson(`"z"`)));
+    assert(!v.isValid(parseJson(`""`)));
+}

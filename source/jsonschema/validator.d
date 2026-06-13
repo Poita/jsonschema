@@ -29,20 +29,24 @@ final class Validator
     }
 
     /// Validate a `std.json.JSONValue` instance.
+    ///
+    /// `const`: a compiled `Validator` holds no mutable state, so one instance
+    /// is safe to share across threads/fibers for concurrent read-only
+    /// validation. All per-call state lives in `EvalState` / `Evaluated`.
     ValidationResult validate(in std.json.JSONValue instance,
-            OutputFormat format = OutputFormat.basic)
+            OutputFormat format = OutputFormat.basic) const
     {
         return validateWith!StdJsonAdapter(instance, format);
     }
 
     /// Validate an instance held in the library's internal representation.
-    ValidationResult validate(in JsonNode instance, OutputFormat format = OutputFormat.basic)
+    ValidationResult validate(in JsonNode instance, OutputFormat format = OutputFormat.basic) const
     {
         return validateWith!JsonNodeAdapter(instance, format);
     }
 
     /// Validate an instance of any adapted JSON type.
-    ValidationResult validateWith(A)(in A.Value instance, OutputFormat format = OutputFormat.basic)
+    ValidationResult validateWith(A)(in A.Value instance, OutputFormat format = OutputFormat.basic) const
             if (isJsonAdapter!A)
     {
         EvalState!A st;
@@ -55,7 +59,7 @@ final class Validator
     }
 
     /// Convenience: flag-format validity check.
-    bool isValid(V)(in V instance)
+    bool isValid(V)(in V instance) const
     {
         static if (is(V == JsonNode))
             return validateWith!JsonNodeAdapter(instance, OutputFormat.flag).valid;
@@ -70,7 +74,7 @@ import std.json;
 
 private struct EvalState(A)
 {
-    SchemaResource[] dynStack;
+    const(SchemaResource)[] dynStack;
     ValidationError[] errors;
     bool collect;
     bool assertFormats;
@@ -143,8 +147,8 @@ private void fail(A)(ref EvalState!A st, string ip, string kp, lazy string msg) 
 
 // --- the evaluator ---
 
-package bool evalSchema(A)(CompiledSchema s, in A.Value v, string ip, string kp,
-        ref EvalState!A st, ref Evaluated ev)
+package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
 {
     if (++st.depth > st.maxDepth)
         throw new ValidationException(
@@ -186,7 +190,9 @@ package bool evalSchema(A)(CompiledSchema s, in A.Value v, string ip, string kp,
     }
     if (s.dynRefInfo !is null)
     {
-        auto target = s.dynRefInfo.target;
+        import std.typecons : rebindable;
+
+        auto target = rebindable(s.dynRefInfo.target);
         if (s.dynRefInfo.dynamicCandidate)
             foreach (res; st.dynStack)
                 if (auto p = s.dynRefInfo.anchorName in res.dynamicAnchors)
@@ -430,7 +436,7 @@ private bool typeMatches(A)(ubyte mask, in A.Value v, JsonKind kind)
     }
 }
 
-private bool checkNumber(A)(CompiledSchema s, in JsonNumber n, string ip,
+private bool checkNumber(A)(const CompiledSchema s, in JsonNumber n, string ip,
         string kp, ref EvalState!A st)
 {
     bool ok = true;
@@ -462,7 +468,8 @@ private bool checkNumber(A)(CompiledSchema s, in JsonNumber n, string ip,
     return ok;
 }
 
-private bool checkString(A)(CompiledSchema s, string str, string ip, string kp, ref EvalState!A st)
+private bool checkString(A)(const CompiledSchema s, string str, string ip,
+        string kp, ref EvalState!A st)
 {
     bool ok = true;
     if (s.maxLength != absent || s.minLength != absent)
@@ -494,8 +501,8 @@ private bool checkString(A)(CompiledSchema s, string str, string ip, string kp, 
     return ok;
 }
 
-private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp,
-        ref EvalState!A st, ref Evaluated ev)
+private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
 {
     bool ok = true;
     const len = A.objectLength(v);
@@ -588,8 +595,8 @@ private bool checkObject(A)(CompiledSchema s, in A.Value v, string ip, string kp
     return ok;
 }
 
-private bool checkArray(A)(CompiledSchema s, in A.Value v, string ip, string kp,
-        ref EvalState!A st, ref Evaluated ev)
+private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
 {
     bool ok = true;
     const len = A.arrayLength(v);
