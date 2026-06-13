@@ -11,8 +11,16 @@ import jsonschema.node : JsonNode;
 import jsonschema.pointer : escapeToken;
 
 import std.conv : to;
+import std.traits : fullyQualifiedName;
 
 @safe:
+
+/// True when `V` is `vibe.data.json.Json`, matched by fully-qualified name so
+/// the base package never imports vibe-d. Used to give callers a directed
+/// error pointing at `validateJson` instead of a generic resolution failure.
+private enum isVibeJson(V) = V.stringof == "Json" && __traits(compiles, {
+        enum n = fullyQualifiedName!V;
+    }) && fullyQualifiedName!V == "vibe.data.json.Json";
 
 /// A compiled, reusable schema validator. Create via `compileSchema`; then
 /// validate any number of instances of either built-in JSON type (or any
@@ -33,6 +41,11 @@ final class Validator
     /// `const`: a compiled `Validator` holds no mutable state, so one instance
     /// is safe to share across threads/fibers for concurrent read-only
     /// validation. All per-call state lives in `EvalState` / `Evaluated`.
+    ///
+    /// Note for vibe users: `vibe.data.json.Json` is not a member overload of
+    /// `validate` because `Validator` lives in the vibe-free base package. Use
+    /// the free function `validateJson` (or `validateWith!VibeJsonAdapter`)
+    /// from the `jsonschema:vibe` subpackage instead.
     ValidationResult validate(in std.json.JSONValue instance,
             OutputFormat format = OutputFormat.basic) const
     {
@@ -43,6 +56,20 @@ final class Validator
     ValidationResult validate(in JsonNode instance, OutputFormat format = OutputFormat.basic) const
     {
         return validateWith!JsonNodeAdapter(instance, format);
+    }
+
+    /// Directed failure for `validate(vibe.data.json.Json)`. Matches only the
+    /// vibe `Json` type (detected by name, so the base package keeps its
+    /// vibe-free guarantee) and emits a message naming `validateJson`, rather
+    /// than a generic overload-resolution error.
+    ValidationResult validate(V)(in V instance, OutputFormat format = OutputFormat.basic) const
+            if (isVibeJson!V)
+    {
+        static assert(false, "vibe `Json` instances must be validated with the "
+                ~ "`validateJson` free function (or `validateWith!VibeJsonAdapter`) "
+                ~ "from the `jsonschema:vibe` subpackage, not `Validator.validate`. "
+                ~ "`Validator` lives in the vibe-free base package, so it has no "
+                ~ "`Json` member overload.");
     }
 
     /// Validate an instance of any adapted JSON type.
@@ -59,9 +86,18 @@ final class Validator
     }
 
     /// Convenience: flag-format validity check.
+    ///
+    /// Note for vibe users: check `vibe.data.json.Json` validity via
+    /// `validateJson(...).valid` (or `validateWith!VibeJsonAdapter`) from the
+    /// `jsonschema:vibe` subpackage; the base package's `isValid` cannot accept
+    /// it (see `validate`).
     bool isValid(V)(in V instance) const
     {
-        static if (is(V == JsonNode))
+        static if (isVibeJson!V)
+            static assert(false, "vibe `Json` instances cannot use "
+                    ~ "`Validator.isValid`; check validity with " ~ "`validateJson(instance).valid` (or "
+                    ~ "`validateWith!VibeJsonAdapter`) from the `jsonschema:vibe` " ~ "subpackage.");
+        else static if (is(V == JsonNode))
             return validateWith!JsonNodeAdapter(instance, OutputFormat.flag).valid;
         else
             return validate(instance, OutputFormat.flag).valid;
@@ -681,8 +717,8 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.additionalItemsSchema, elem, ip ~ "/" ~ i.to!string,
-                    kp ~ "/additionalItems", st, se))
+            if (evalSchema!A(s.additionalItemsSchema, elem,
+                    ip ~ "/" ~ i.to!string, kp ~ "/additionalItems", st, se))
                 ev.markItem(i);
             else
                 failed = true;

@@ -217,6 +217,19 @@ unittest  // basic validation through the vibe adapter
     assert(!v.validateJson(parseJsonString(`{"a": "x"}`)).valid);
 }
 
+unittest  // calling Validator.validate/isValid on a vibe Json fails with a directed message
+{
+    auto v = compileSchema(parseJsonString(`{"type": "integer"}`));
+    auto j = parseJsonString("1");
+    // The base-package member overloads must not accept vibe `Json`; callers
+    // are steered to `validateJson` instead of hitting a generic resolution
+    // error.
+    static assert(!__traits(compiles, v.validate(j)));
+    static assert(!__traits(compiles, v.isValid(j)));
+    // The supported path compiles and works.
+    assert(v.validateJson(j).valid);
+}
+
 unittest  // vibe bigInt keeps 64-bit fidelity (no double round-trip)
 {
     // 2^53 + 1 vs maximum 2^53: a double comparison would wrongly accept.
