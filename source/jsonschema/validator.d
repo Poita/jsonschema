@@ -180,6 +180,14 @@ private void fail(A)(ref EvalState!A st, string ip, string kp, lazy string msg) 
         st.errors ~= ValidationError(ip, kp, msg);
 }
 
+/// Append `suffix` to a location `base`, but only when error collection is
+/// active. In flag mode the resulting string is never read, so the
+/// concatenation (and any cost of computing `suffix`) is skipped entirely.
+private string loc(A)(ref EvalState!A st, string base, lazy string suffix)
+{
+    return st.collect ? base ~ suffix : base;
+}
+
 // --- the evaluator ---
 
 package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
@@ -232,7 +240,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         // Up to draft-07, a `$ref` suppresses every sibling keyword: evaluate
         // only the reference and adopt its annotations.
         Evaluated sub;
-        const r = evalSchema!A(s.refInfo.target, v, ip, kp ~ "/$ref", st, sub);
+        const r = evalSchema!A(s.refInfo.target, v, ip, loc(st, kp, "/$ref"), st, sub);
         if (r)
             ev.merge(sub);
         return r;
@@ -240,7 +248,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     if (s.refInfo !is null)
     {
         Evaluated sub;
-        if (evalSchema!A(s.refInfo.target, v, ip, kp ~ "/$ref", st, sub))
+        if (evalSchema!A(s.refInfo.target, v, ip, loc(st, kp, "/$ref"), st, sub))
             ev.merge(sub);
         else
             ok = false;
@@ -258,7 +266,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
                     break;
                 }
         Evaluated sub;
-        if (evalSchema!A(target, v, ip, kp ~ "/$dynamicRef", st, sub))
+        if (evalSchema!A(target, v, ip, loc(st, kp, "/$dynamicRef"), st, sub))
             ev.merge(sub);
         else
             ok = false;
@@ -272,12 +280,12 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     // --- validation: any instance type ---
     if (s.hasType && !typeMatches!A(s.typeMask, v, kind))
     {
-        fail(st, ip, kp ~ "/type", "instance type does not match");
+        fail(st, ip, loc(st, kp, "/type"), "instance type does not match");
         ok = false;
     }
     if (s.hasConst && !valueEqualsNode!A(v, s.constValue, kind))
     {
-        fail(st, ip, kp ~ "/const", "instance does not equal the const value");
+        fail(st, ip, loc(st, kp, "/const"), "instance does not equal the const value");
         ok = false;
     }
     if (s.hasEnum)
@@ -291,7 +299,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             }
         if (!found)
         {
-            fail(st, ip, kp ~ "/enum", "instance is not one of the enum values");
+            fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
             ok = false;
         }
     }
@@ -306,7 +314,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     if (s.hasFormat && (st.assertFormats || s.resource.vocab.formatAssertion)
             && kind == JsonKind.string_ && !checkFormat(s.format, A.getString(v)))
     {
-        fail(st, ip, kp ~ "/format", "instance does not match format '" ~ s.format ~ "'");
+        fail(st, ip, loc(st, kp, "/format"), "instance does not match format '" ~ s.format ~ "'");
         ok = false;
     }
 
@@ -317,7 +325,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     foreach (i, sub; s.allOf)
     {
         Evaluated se;
-        if (evalSchema!A(sub, v, ip, kp ~ "/allOf/" ~ i.to!string, st, se))
+        if (evalSchema!A(sub, v, ip, loc(st, kp, "/allOf/" ~ i.to!string), st, se))
             ev.merge(se);
         else
         {
@@ -333,7 +341,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         foreach (i, sub; s.anyOf)
         {
             Evaluated se;
-            if (evalSchema!A(sub, v, ip, kp ~ "/anyOf/" ~ i.to!string, st, se))
+            if (evalSchema!A(sub, v, ip, loc(st, kp, "/anyOf/" ~ i.to!string), st, se))
             {
                 any = true;
                 ev.merge(se);
@@ -343,7 +351,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             shrinkErrors(st, mark);
         else
         {
-            fail(st, ip, kp ~ "/anyOf", "instance does not match any anyOf branch");
+            fail(st, ip, loc(st, kp, "/anyOf"), "instance does not match any anyOf branch");
             ok = false;
         }
     }
@@ -354,7 +362,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         foreach (i, sub; s.oneOf)
         {
             Evaluated se;
-            if (evalSchema!A(sub, v, ip, kp ~ "/oneOf/" ~ i.to!string, st, se))
+            if (evalSchema!A(sub, v, ip, loc(st, kp, "/oneOf/" ~ i.to!string), st, se))
             {
                 matches++;
                 ev.merge(se);
@@ -366,7 +374,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             if (matches > 1)
                 shrinkErrors(st, mark);
-            fail(st, ip, kp ~ "/oneOf", matches == 0
+            fail(st, ip, loc(st, kp, "/oneOf"), matches == 0
                     ? "instance does not match any oneOf branch"
                     : "instance matches more than one oneOf branch");
             ok = false;
@@ -376,11 +384,11 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         const mark = st.errors.length;
         Evaluated se; // annotations inside "not" are never retained
-        const r = evalSchema!A(s.notSchema, v, ip, kp ~ "/not", st, se);
+        const r = evalSchema!A(s.notSchema, v, ip, loc(st, kp, "/not"), st, se);
         shrinkErrors(st, mark);
         if (r)
         {
-            fail(st, ip, kp ~ "/not", "instance must not match the 'not' schema");
+            fail(st, ip, loc(st, kp, "/not"), "instance must not match the 'not' schema");
             ok = false;
         }
     }
@@ -388,7 +396,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         const mark = st.errors.length;
         Evaluated condEv;
-        const condOk = evalSchema!A(s.ifSchema, v, ip, kp ~ "/if", st, condEv);
+        const condOk = evalSchema!A(s.ifSchema, v, ip, loc(st, kp, "/if"), st, condEv);
         shrinkErrors(st, mark); // "if" outcomes are not failures
         if (condOk)
         {
@@ -396,7 +404,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             if (s.thenSchema !is null)
             {
                 Evaluated se;
-                if (evalSchema!A(s.thenSchema, v, ip, kp ~ "/then", st, se))
+                if (evalSchema!A(s.thenSchema, v, ip, loc(st, kp, "/then"), st, se))
                     ev.merge(se);
                 else
                     ok = false;
@@ -405,7 +413,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         else if (s.elseSchema !is null)
         {
             Evaluated se;
-            if (evalSchema!A(s.elseSchema, v, ip, kp ~ "/else", st, se))
+            if (evalSchema!A(s.elseSchema, v, ip, loc(st, kp, "/else"), st, se))
                 ev.merge(se);
             else
                 ok = false;
@@ -438,7 +446,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
                 return 0;
             Evaluated se;
             if (evalSchema!A(s.unevaluatedProperties, member,
-                ip ~ "/" ~ escapeToken(key), kp ~ "/unevaluatedProperties", st, se))
+                loc(st, ip, "/" ~ escapeToken(key)), loc(st, kp, "/unevaluatedProperties"), st, se))
                 ev.markProp(key);
             else
                 failed = true;
@@ -446,7 +454,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         });
         if (failed)
         {
-            fail(st, ip, kp ~ "/unevaluatedProperties", "unevaluated properties do not validate");
+            fail(st, ip, loc(st, kp, "/unevaluatedProperties"), "unevaluated properties do not validate");
             ok = false;
         }
     }
@@ -460,15 +468,15 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
                 continue;
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.unevaluatedItems, elem, ip ~ "/" ~ i.to!string,
-                    kp ~ "/unevaluatedItems", st, se))
+            if (evalSchema!A(s.unevaluatedItems, elem, loc(st, ip, "/" ~ i.to!string),
+                    loc(st, kp, "/unevaluatedItems"), st, se))
                 ev.markItem(i);
             else
                 failed = true;
         }
         if (failed)
         {
-            fail(st, ip, kp ~ "/unevaluatedItems", "unevaluated items do not validate");
+            fail(st, ip, loc(st, kp, "/unevaluatedItems"), "unevaluated items do not validate");
             ok = false;
         }
     }
@@ -524,35 +532,35 @@ private bool checkNumber(A)(const CompiledSchema s, in JsonNumber n, string ip,
     bool ok = true;
     if (s.hasMultipleOf && !isMultipleOf(n, s.multipleOf))
     {
-        fail(st, ip, kp ~ "/multipleOf", "instance is not a multiple of the divisor");
+        fail(st, ip, loc(st, kp, "/multipleOf"), "instance is not a multiple of the divisor");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.hasMaximum && cmpNumbers(n, s.maximum) > 0)
     {
-        fail(st, ip, kp ~ "/maximum", "instance exceeds the maximum");
+        fail(st, ip, loc(st, kp, "/maximum"), "instance exceeds the maximum");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.hasExclusiveMaximum && cmpNumbers(n, s.exclusiveMaximum) >= 0)
     {
-        fail(st, ip, kp ~ "/exclusiveMaximum", "instance is not below the exclusive maximum");
+        fail(st, ip, loc(st, kp, "/exclusiveMaximum"), "instance is not below the exclusive maximum");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.hasMinimum && cmpNumbers(n, s.minimum) < 0)
     {
-        fail(st, ip, kp ~ "/minimum", "instance is below the minimum");
+        fail(st, ip, loc(st, kp, "/minimum"), "instance is below the minimum");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.hasExclusiveMinimum && cmpNumbers(n, s.exclusiveMinimum) <= 0)
     {
-        fail(st, ip, kp ~ "/exclusiveMinimum", "instance is not above the exclusive minimum");
+        fail(st, ip, loc(st, kp, "/exclusiveMinimum"), "instance is not above the exclusive minimum");
         ok = false;
         if (!st.collect)
             return false;
@@ -571,14 +579,14 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
         const len = () @trusted { return str.count; }();
         if (s.maxLength != absent && len > s.maxLength)
         {
-            fail(st, ip, kp ~ "/maxLength", "string is longer than maxLength");
+            fail(st, ip, loc(st, kp, "/maxLength"), "string is longer than maxLength");
             ok = false;
             if (!st.collect)
                 return false;
         }
         if (s.minLength != absent && len < s.minLength)
         {
-            fail(st, ip, kp ~ "/minLength", "string is shorter than minLength");
+            fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
             ok = false;
             if (!st.collect)
                 return false;
@@ -590,7 +598,7 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
 
         if (matchFirst(str, s.pattern).empty)
         {
-            fail(st, ip, kp ~ "/pattern", "string does not match pattern '" ~ s.patternSource ~ "'");
+            fail(st, ip, loc(st, kp, "/pattern"), "string does not match pattern '" ~ s.patternSource ~ "'");
             ok = false;
         }
     }
@@ -605,14 +613,14 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
 
     if (s.maxProperties != absent && len > s.maxProperties)
     {
-        fail(st, ip, kp ~ "/maxProperties", "object has more than maxProperties members");
+        fail(st, ip, loc(st, kp, "/maxProperties"), "object has more than maxProperties members");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.minProperties != absent && len < s.minProperties)
     {
-        fail(st, ip, kp ~ "/minProperties", "object has fewer than minProperties members");
+        fail(st, ip, loc(st, kp, "/minProperties"), "object has fewer than minProperties members");
         ok = false;
         if (!st.collect)
             return false;
@@ -620,7 +628,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
     foreach (name; s.required)
         if (A.objectGet(v, name) is null)
         {
-            fail(st, ip, kp ~ "/required", "missing required property '" ~ name ~ "'");
+            fail(st, ip, loc(st, kp, "/required"), "missing required property '" ~ name ~ "'");
             ok = false;
             if (!st.collect)
                 return false;
@@ -630,7 +638,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             foreach (name; names)
                 if (A.objectGet(v, name) is null)
                 {
-                    fail(st, ip, kp ~ "/dependentRequired",
+                    fail(st, ip, loc(st, kp, "/dependentRequired"),
                             "property '" ~ trigger ~ "' requires property '" ~ name ~ "'");
                     ok = false;
                     if (!st.collect)
@@ -640,7 +648,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         if (A.objectGet(v, trigger) !is null)
         {
             Evaluated se;
-            if (evalSchema!A(sub, v, ip, kp ~ "/dependentSchemas/" ~ escapeToken(trigger), st, se))
+            if (evalSchema!A(sub, v, ip, loc(st, kp, "/dependentSchemas/" ~ escapeToken(trigger)), st, se))
                 ev.merge(se);
             else
             {
@@ -657,12 +665,12 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
 
         bool failed;
         A.objectEach(v, (string key, in A.Value member) {
-            const mp = ip ~ "/" ~ escapeToken(key);
+            const mp = loc(st, ip, "/" ~ escapeToken(key));
             bool matched;
             if (auto p = key in s.properties)
             {
                 Evaluated se;
-                if (evalSchema!A(*p, member, mp, kp ~ "/properties/" ~ escapeToken(key), st, se))
+                if (evalSchema!A(*p, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
                     ev.markProp(key);
                 else
                     failed = true;
@@ -673,7 +681,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
                 {
                     Evaluated se;
                     if (evalSchema!A(pp.schema, member, mp,
-                        kp ~ "/patternProperties/" ~ escapeToken(pp.source), st, se))
+                        loc(st, kp, "/patternProperties/" ~ escapeToken(pp.source)), st, se))
                         ev.markProp(key);
                     else
                         failed = true;
@@ -683,7 +691,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 Evaluated se;
                 if (evalSchema!A(s.additionalProperties, member, mp,
-                    kp ~ "/additionalProperties", st, se))
+                    loc(st, kp, "/additionalProperties"), st, se))
                     ev.markProp(key);
                 else
                     failed = true;
@@ -692,7 +700,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 const nameValue = A.ofString(key);
                 Evaluated se;
-                if (!evalSchema!A(s.propertyNames, nameValue, mp, kp ~ "/propertyNames", st, se))
+                if (!evalSchema!A(s.propertyNames, nameValue, mp, loc(st, kp, "/propertyNames"), st, se))
                     failed = true;
             }
             // Flag mode: stop visiting members once one has failed.
@@ -712,14 +720,14 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
 
     if (s.maxItems != absent && len > s.maxItems)
     {
-        fail(st, ip, kp ~ "/maxItems", "array has more than maxItems items");
+        fail(st, ip, loc(st, kp, "/maxItems"), "array has more than maxItems items");
         ok = false;
         if (!st.collect)
             return false;
     }
     if (s.minItems != absent && len < s.minItems)
     {
-        fail(st, ip, kp ~ "/minItems", "array has fewer than minItems items");
+        fail(st, ip, loc(st, kp, "/minItems"), "array has fewer than minItems items");
         ok = false;
         if (!st.collect)
             return false;
@@ -734,7 +742,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
                 const b = A.arrayAt(v, j);
                 if (deepEqualValues!A(a, b))
                 {
-                    fail(st, ip, kp ~ "/uniqueItems", "array items are not unique");
+                    fail(st, ip, loc(st, kp, "/uniqueItems"), "array items are not unique");
                     ok = false;
                     break outer;
                 }
@@ -752,8 +760,8 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.prefixItems[i], elem, ip ~ "/" ~ i.to!string,
-                    kp ~ "/prefixItems/" ~ i.to!string, st, se))
+            if (evalSchema!A(s.prefixItems[i], elem, loc(st, ip, "/" ~ i.to!string),
+                    loc(st, kp, "/prefixItems/" ~ i.to!string), st, se))
                 ev.markItem(i);
             else
             {
@@ -773,7 +781,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.itemsSchema, elem, ip ~ "/" ~ i.to!string, kp ~ "/items", st, se))
+            if (evalSchema!A(s.itemsSchema, elem, loc(st, ip, "/" ~ i.to!string), loc(st, kp, "/items"), st, se))
                 ev.markItem(i);
             else
             {
@@ -794,8 +802,8 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.additionalItemsSchema, elem,
-                    ip ~ "/" ~ i.to!string, kp ~ "/additionalItems", st, se))
+            if (evalSchema!A(s.additionalItemsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+                    loc(st, kp, "/additionalItems"), st, se))
                 ev.markItem(i);
             else
             {
@@ -815,8 +823,8 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.containsSchema, elem, ip ~ "/" ~ i.to!string,
-                    kp ~ "/contains", st, se))
+            if (evalSchema!A(s.containsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+                    loc(st, kp, "/contains"), st, se))
                 matchedIdx ~= i;
         }
         const minC = s.minContains != absent ? s.minContains : 1;
@@ -824,7 +832,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         if (cast(long) matchedIdx.length < minC)
         {
             shrinkErrors(st, mark); // keep only the summary below
-            fail(st, ip, kp ~ "/contains", minC == 1
+            fail(st, ip, loc(st, kp, "/contains"), minC == 1
                     ? "array contains no matching item"
                     : "array contains fewer matching items than minContains");
             groupOk = false;
@@ -833,7 +841,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
             shrinkErrors(st, mark); // non-matching items are not failures
         if (s.maxContains != absent && cast(long) matchedIdx.length > s.maxContains)
         {
-            fail(st, ip, kp ~ "/maxContains",
+            fail(st, ip, loc(st, kp, "/maxContains"),
                     "array contains more matching items than maxContains");
             groupOk = false;
         }
