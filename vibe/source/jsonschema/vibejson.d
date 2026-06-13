@@ -2,7 +2,8 @@
 ///
 /// This module is the only place vibe-d appears as a dependency. It provides:
 /// `VibeJsonAdapter` (validate `vibe.data.json.Json` instances),
-/// `compileSchema` for `Json` schema documents, `validateJson` convenience,
+/// `compileSchema` for `Json` schema documents, `validateJson` /
+/// `isValidJson` convenience,
 /// and `nodeToVibeJson` / `vibeJsonToNode` conversions (including rendering
 /// generated schemas as `Json`).
 module jsonschema.vibejson;
@@ -197,6 +198,13 @@ ValidationResult validateJson(Validator v, in Json instance, OutputFormat format
     return v.validateWith!VibeJsonAdapter(instance, format);
 }
 
+/// Convenience: flag-format validity check for a `vibe.data.json.Json`
+/// instance. Mirrors `Validator.isValid` for vibe parity.
+bool isValidJson(Validator v, in Json instance)
+{
+    return v.validateWith!VibeJsonAdapter(instance, OutputFormat.flag).valid;
+}
+
 /// Register a `Json` schema document in a store.
 void registerJson(SchemaStore store, string uri, in Json doc)
 {
@@ -228,6 +236,21 @@ unittest  // calling Validator.validate/isValid on a vibe Json fails with a dire
     static assert(!__traits(compiles, v.isValid(j)));
     // The supported path compiles and works.
     assert(v.validateJson(j).valid);
+}
+
+unittest  // isValidJson mirrors validateJson(...).valid for valid instances
+{
+    auto v = compileSchema(parseJsonString(
+            `{"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]}`));
+    assert(v.isValidJson(parseJsonString(`{"a": 1}`)));
+}
+
+unittest  // isValidJson reports invalid instances
+{
+    auto v = compileSchema(parseJsonString(
+            `{"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]}`));
+    assert(!v.isValidJson(parseJsonString(`{}`)));
+    assert(!v.isValidJson(parseJsonString(`{"a": "x"}`)));
 }
 
 unittest  // vibe bigInt keeps 64-bit fidelity (no double round-trip)
