@@ -82,7 +82,7 @@ fn main() {
         let correct = valid.iter().all(|x| validator.is_valid(x))
             && invalid.iter().all(|x| !validator.is_valid(x));
 
-        let mut time_validate = |instance: &Value| -> (f64, f64) {
+        let time_validate = |instance: &Value| -> (f64, f64) {
             for _ in 0..warmup {
                 black_box(validator.is_valid(instance));
             }
