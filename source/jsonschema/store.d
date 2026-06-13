@@ -54,44 +54,75 @@ final class SchemaStore
         return uri in rawDocs;
     }
 
-    private void registerBundledMetaSchemas() pure
+    private void registerBundledMetaSchemas()
     {
-        register("https://json-schema.org/draft/2020-12/schema", import("schema.json"));
-        register("https://json-schema.org/draft/2020-12/meta/core", import("meta/core.json"));
-        register("https://json-schema.org/draft/2020-12/meta/applicator",
-                import("meta/applicator.json"));
-        register("https://json-schema.org/draft/2020-12/meta/validation",
-                import("meta/validation.json"));
-        register("https://json-schema.org/draft/2020-12/meta/unevaluated",
+        // Copy references from the shared, already-parsed cache. `JsonNode` is a
+        // value type backed by immutable slices, so sharing parsed nodes across
+        // stores is safe: stores only read `rawDocs` via `lookup`, never mutate
+        // registered documents.
+        foreach (uri, doc; bundledMetaSchemas())
+            rawDocs[uri] = doc;
+    }
+}
+
+/// Bundled meta-schema documents, parsed once and shared across every store.
+///
+/// The map is built lazily on first access and cached in a `__gshared`
+/// variable. Parsing is deterministic and the result is treated as immutable,
+/// so a benign race during initialization at worst parses twice; subsequent
+/// `new SchemaStore` calls copy `JsonNode` references instead of re-parsing.
+private JsonNode[string] bundledMetaSchemas() @trusted nothrow
+{
+    __gshared JsonNode[string] cache;
+
+    static JsonNode[string] build() nothrow
+    {
+        JsonNode[string] m;
+
+        void add(string uri, string jsonText) nothrow
+        {
+            try
+                m[uri] = parseJson(jsonText);
+            catch (Exception)
+                assert(false, "bundled meta-schema failed to parse: " ~ uri);
+        }
+
+        add("https://json-schema.org/draft/2020-12/schema", import("schema.json"));
+        add("https://json-schema.org/draft/2020-12/meta/core", import("meta/core.json"));
+        add("https://json-schema.org/draft/2020-12/meta/applicator", import("meta/applicator.json"));
+        add("https://json-schema.org/draft/2020-12/meta/validation", import("meta/validation.json"));
+        add("https://json-schema.org/draft/2020-12/meta/unevaluated",
                 import("meta/unevaluated.json"));
-        register("https://json-schema.org/draft/2020-12/meta/format-annotation",
+        add("https://json-schema.org/draft/2020-12/meta/format-annotation",
                 import("meta/format-annotation.json"));
-        register("https://json-schema.org/draft/2020-12/meta/content", import("meta/content.json"));
-        register("https://json-schema.org/draft/2020-12/meta/meta-data",
-                import("meta/meta-data.json"));
+        add("https://json-schema.org/draft/2020-12/meta/content", import("meta/content.json"));
+        add("https://json-schema.org/draft/2020-12/meta/meta-data", import("meta/meta-data.json"));
 
         // Draft 2019-09 (main schema plus its six vocabulary meta-schemas).
-        register("https://json-schema.org/draft/2019-09/schema",
-                import("draft2019-09/schema.json"));
-        register("https://json-schema.org/draft/2019-09/meta/core",
+        add("https://json-schema.org/draft/2019-09/schema", import("draft2019-09/schema.json"));
+        add("https://json-schema.org/draft/2019-09/meta/core",
                 import("draft2019-09/meta/core.json"));
-        register("https://json-schema.org/draft/2019-09/meta/applicator",
+        add("https://json-schema.org/draft/2019-09/meta/applicator",
                 import("draft2019-09/meta/applicator.json"));
-        register("https://json-schema.org/draft/2019-09/meta/validation",
+        add("https://json-schema.org/draft/2019-09/meta/validation",
                 import("draft2019-09/meta/validation.json"));
-        register("https://json-schema.org/draft/2019-09/meta/meta-data",
+        add("https://json-schema.org/draft/2019-09/meta/meta-data",
                 import("draft2019-09/meta/meta-data.json"));
-        register("https://json-schema.org/draft/2019-09/meta/format",
+        add("https://json-schema.org/draft/2019-09/meta/format",
                 import("draft2019-09/meta/format.json"));
-        register("https://json-schema.org/draft/2019-09/meta/content",
+        add("https://json-schema.org/draft/2019-09/meta/content",
                 import("draft2019-09/meta/content.json"));
 
         // Draft-07 (a single self-contained meta-schema; no vocabularies).
-        register("http://json-schema.org/draft-07/schema#",
-                import("draft-07/schema.json"));
-        register("http://json-schema.org/draft-07/schema",
-                import("draft-07/schema.json"));
+        add("http://json-schema.org/draft-07/schema#", import("draft-07/schema.json"));
+        add("http://json-schema.org/draft-07/schema", import("draft-07/schema.json"));
+
+        return m;
     }
+
+    if (cache is null)
+        cache = build();
+    return cache;
 }
 
 unittest  // a fresh store carries the bundled meta-schemas
@@ -103,6 +134,18 @@ unittest  // a fresh store carries the bundled meta-schemas
     assert(store.contains("https://json-schema.org/draft/2019-09/schema"));
     assert(store.contains("https://json-schema.org/draft/2019-09/meta/applicator"));
     assert(store.contains("http://json-schema.org/draft-07/schema#"));
+}
+
+unittest  // bundled docs are equal across independently constructed stores
+{
+    import jsonschema.node : jsonEquals;
+
+    auto a = new SchemaStore;
+    auto b = new SchemaStore;
+    auto da = a.lookup("https://json-schema.org/draft/2020-12/schema");
+    auto db = b.lookup("https://json-schema.org/draft/2020-12/schema");
+    assert(da !is null && db !is null);
+    assert(jsonEquals(*da, *db));
 }
 
 unittest  // register from text and from std.json
