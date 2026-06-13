@@ -14,10 +14,10 @@ public import jsonschema.adapter : isJsonAdapter, JsonKind, JsonNumber,
 public import jsonschema.attributes;
 public import jsonschema.compiler : compileSchema;
 public import jsonschema.generate : applyUdaFacets, GeneratorSettings, jsonSchemaOf;
-public import jsonschema.ir : dialect202012, FormatMode, OutputFormat,
-    SchemaCompileException, SchemaException, SchemaResolver,
-    UnsupportedDialectException, ValidationError, ValidationException,
-    ValidationResult, ValidatorSettings;
+public import jsonschema.ir : dialect202012, dialect201909, dialect07,
+    FormatMode, OutputFormat, SchemaCompileException, SchemaException,
+    SchemaResolver, UnsupportedDialectException,
+    ValidationError, ValidationException, ValidationResult, ValidatorSettings;
 public import jsonschema.node : fromStdJson, JsonNode, jsonEquals,
     JsonParseException, parseJson, toStdJson;
 public import jsonschema.store : SchemaStore;
@@ -658,4 +658,11 @@ unittest  // an unevaluatedItems pass sees items marked by a contains inside all
     // the remaining items are not, so unevaluatedItems:false rejects them.
     assert(!v.accepts(`[1, 2, 3]`));
     assert(v.accepts(`[2]`));
+}
+
+unittest  // all three dialect constants are reachable through the package
+{
+    static assert(dialect202012 == "https://json-schema.org/draft/2020-12/schema");
+    static assert(dialect201909 == "https://json-schema.org/draft/2019-09/schema");
+    static assert(dialect07 == "http://json-schema.org/draft-07/schema#");
 }
