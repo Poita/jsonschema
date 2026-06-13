@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["id", "created", "contact", "homepage", "ip"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "created": { "type": "string", "format": "date-time" },
+    "due": { "type": "string", "format": "date" },
+    "contact": { "type": "string", "format": "email" },
+    "homepage": { "type": "string", "format": "uri" },
+    "ip": { "type": "string", "format": "ipv4" },
+    "ip6": { "type": "string", "format": "ipv6" },
+    "host": { "type": "string", "format": "hostname" }
+  },
+  "additionalProperties": false
+}

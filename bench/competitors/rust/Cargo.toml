@@ -1,0 +1,16 @@
+[package]
+name = "jsonschema-bench-rust"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+[dependencies]
+jsonschema = "0.20"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true

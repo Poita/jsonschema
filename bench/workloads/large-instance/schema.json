@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["generatedAt", "records"],
+  "properties": {
+    "generatedAt": { "type": "string" },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "active", "balance", "roles"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 0 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "active": { "type": "boolean" },
+          "balance": { "type": "number" },
+          "roles": {
+            "type": "array",
+            "items": { "enum": ["admin", "editor", "viewer", "guest"] },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

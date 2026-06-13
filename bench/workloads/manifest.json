@@ -1,0 +1,36 @@
+{
+  "defaults": { "warmup": 2000, "iterations": 20000, "samples": 15 },
+  "workloads": [
+    {
+      "name": "small-doc",
+      "schema": "small-doc/schema.json",
+      "valid": ["small-doc/valid/record.json"],
+      "invalid": ["small-doc/invalid/record.json"],
+      "crossLanguage": true
+    },
+    {
+      "name": "schema-heavy",
+      "schema": "schema-heavy/schema.json",
+      "valid": ["schema-heavy/valid/order.json"],
+      "invalid": ["schema-heavy/invalid/order.json"],
+      "crossLanguage": true
+    },
+    {
+      "name": "large-instance",
+      "schema": "large-instance/schema.json",
+      "valid": ["large-instance/valid/dataset.json"],
+      "invalid": ["large-instance/invalid/dataset.json"],
+      "iterations": 200,
+      "samples": 15,
+      "crossLanguage": true
+    },
+    {
+      "name": "format-heavy",
+      "schema": "format-heavy/schema.json",
+      "valid": ["format-heavy/valid/doc.json"],
+      "invalid": ["format-heavy/invalid/doc.json"],
+      "formatAssertion": true,
+      "crossLanguage": false
+    }
+  ]
+}
