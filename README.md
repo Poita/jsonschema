@@ -148,8 +148,7 @@ referenced via `$ref`; everything else is inlined. Unsupported types
 ### Inline subschemas (no `$ref`)
 
 By default a schema uses `$defs`/`$ref` for shared and recursive struct types.
-Some consumers don't follow `$ref` inside an embedded schema (e.g. a few MCP
-clients are weak on `$ref` within a tool `inputSchema`). For them, set
+Some consumers don't follow `$ref` inside an embedded schema. For them, set
 `inlineSubschemas` to expand every subschema in place, producing a fully
 self-contained document with no `$defs` and no `$ref` — a type used N times is
 expanded N times:
