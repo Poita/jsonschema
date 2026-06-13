@@ -359,8 +359,8 @@ private template inlineRecursionName(T, Ancestors...)
                 static foreach (field; FieldNameTuple!T)
                 {
                     {
-                        enum r = inlineRecursionName!(typeof(__traits(getMember, T,
-                                field)), Ancestors, T);
+                        enum r = inlineRecursionName!(typeof(__traits(getMember,
+                                    T, field)), Ancestors, T);
                         if (r.length)
                             return r;
                     }
@@ -468,9 +468,21 @@ private JsonNode emitTypeInline(T, Ancestors...)()
         static assert(false, "jsonSchemaOf: unsupported type " ~ T.stringof);
 }
 
-/// Emit facet UDAs from a compile-time sequence (e.g. `__traits(getAttributes, …)`)
-/// onto a property schema. Unrecognized UDA types are ignored.
-package void applyUdaFacets(udas...)(ref JsonNode prop)
+/// Fold the constraint-facet UDAs from a compile-time sequence (e.g.
+/// `__traits(getAttributes, someSymbol)`) onto an existing schema node:
+/// `@minimum`, `@maximum`, `@pattern`, `@minLength`, `@maxLength`, `@minItems`,
+/// `@maxItems`, `@format`, `@title`, and `@schemaDefault` map to the matching
+/// keyword; any other UDA is ignored.
+///
+/// `jsonSchemaOf` uses this for struct fields, but it is public so external
+/// code can apply the same facets to symbols that are not struct fields — e.g.
+/// function parameters — without duplicating the mapping:
+///
+/// ---
+/// JsonNode prop = jsonSchemaOf!int;
+/// applyUdaFacets!(__traits(getAttributes, someSymbol))(prop); // folds @minimum etc. onto prop
+/// ---
+public void applyUdaFacets(udas...)(ref JsonNode prop)
 {
     import jsonschema.attributes;
 

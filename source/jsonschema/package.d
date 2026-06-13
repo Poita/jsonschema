@@ -13,7 +13,7 @@ public import jsonschema.adapter : isJsonAdapter, JsonKind, JsonNumber,
     JsonNodeAdapter, StdJsonAdapter;
 public import jsonschema.attributes;
 public import jsonschema.compiler : compileSchema;
-public import jsonschema.generate : GeneratorSettings, jsonSchemaOf;
+public import jsonschema.generate : applyUdaFacets, GeneratorSettings, jsonSchemaOf;
 public import jsonschema.ir : dialect202012, FormatMode, OutputFormat,
     SchemaCompileException, SchemaException, SchemaResolver,
     UnsupportedDialectException, ValidationError, ValidationException,
@@ -339,7 +339,7 @@ unittest  // basic output carries instance and keyword locations
 unittest  // flag output collects no errors
 {
     auto v = compileSchema(`{"type": "string"}`);
-    auto r = v.validate(parseJSON(`1`), OutputFormat.flag);
+    const r = v.validate(parseJSON(`1`), OutputFormat.flag);
     assert(!r.valid);
     assert(r.errors.length == 0);
 }
@@ -390,4 +390,22 @@ unittest  // a deeply self-referential schema hits the depth guard, not a crash
 
     auto v = compileSchema(`{"$ref": "#"}`);
     assertThrown!ValidationException(v.validate(parseJSON(`1`)));
+}
+
+unittest  // applyUdaFacets is public: external callers fold facets onto non-field symbols
+{
+    import jsonschema.attributes : maximum, minimum;
+
+    // The motivating case: constraint UDAs on a function parameter, not a
+    // struct field. The facet mapping is reused rather than duplicated.
+    static void handler(@minimum(0) @maximum(100) int pct)
+    {
+        cast(void) pct;
+    }
+
+    JsonNode prop = jsonSchemaOf!int;
+    static if (is(typeof(handler) Params == __parameters))
+        applyUdaFacets!(__traits(getAttributes, Params[0 .. 1]))(prop);
+    assert(prop.get("minimum").integer_ == 0);
+    assert(prop.get("maximum").integer_ == 100);
 }
