@@ -69,6 +69,14 @@ struct GeneratorSettings
     /// into `$defs` and referencing them with `$ref`. Default false (refs).
     /// Modeled on Rust schemars' `inline_subschemas`.
     bool inlineSubschemas = false;
+
+    /// Render `Nullable!T` as the bare schema for `T`, omitting the `{type:null}`
+    /// branch — i.e. treat `Nullable` purely as optionality, not as `T | null`.
+    /// Default false (emits `anyOf:[T, {null}]`). Useful where the consumer models
+    /// "optional" as a bare type absent from `required` (e.g. tool-call input
+    /// schemas) rather than as a union with null. The enclosing object still
+    /// controls presence via `required`; this flag only affects the value schema.
+    bool nullableOmitsNull = false;
 }
 
 /// Generate the JSON Schema for `T` with runtime-known settings.
@@ -93,6 +101,7 @@ JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
     enum recName = inlineRecursionName!T;
 
     GenContext ctx;
+    ctx.nullableOmitsNull = settings.nullableOmitsNull;
     JsonNode root;
     if (settings.inlineSubschemas)
     {
@@ -101,7 +110,7 @@ JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
         // it never reaches `emitTypeInline` and `jsonSchemaOf!T` still compiles
         // in the default mode.
         static if (recName.length == 0)
-            root = emitTypeInline!T();
+            root = emitTypeInline!T(settings.nullableOmitsNull);
         else
             assert(false, "jsonSchemaOf: cannot inline recursive type " ~ recName
                     ~ " with inlineSubschemas=true; use $defs mode (the default)");
@@ -152,6 +161,7 @@ private struct GenContext
     bool[string] nameTaken;
     JsonNode defs = JsonNode.emptyObject();
     bool[string] emitting;
+    bool nullableOmitsNull; // render Nullable!T as bare T (no {type:null} branch)
 }
 
 // --- pass 1: count struct occurrences and detect recursion ---
@@ -201,8 +211,11 @@ private JsonNode emitType(T)(ref GenContext ctx)
 {
     static if (isInstanceOf!(Nullable, T))
     {
-        // Accepts the inner type or an explicit JSON null; optionality of the
-        // enclosing object member is handled via `required`.
+        // `nullableOmitsNull` treats Nullable purely as optionality: emit the bare
+        // inner schema. Otherwise accept the inner type or an explicit JSON null.
+        // Presence of the enclosing object member is handled via `required`.
+        if (ctx.nullableOmitsNull)
+            return emitType!(TemplateArgsOf!T[0])(ctx);
         auto nullSchema = JsonNode.emptyObject();
         nullSchema.set("type", JsonNode("null"));
         auto variants = JsonNode.emptyArray();
@@ -389,14 +402,18 @@ private template inlineRecursionName(T, Ancestors...)
 
 /// Emit `T` with every subschema inlined: no `$defs`, no `$ref`. A struct type
 /// found in its own `Ancestors` is recursive and rejected at compile time.
-private JsonNode emitTypeInline(T, Ancestors...)()
+private JsonNode emitTypeInline(T, Ancestors...)(bool omitNull)
 {
     static if (isInstanceOf!(Nullable, T))
     {
+        // See `nullableOmitsNull` in GeneratorSettings: emit the bare inner schema
+        // instead of `anyOf:[T, {null}]` when requested.
+        if (omitNull)
+            return emitTypeInline!(TemplateArgsOf!T[0], Ancestors)(omitNull);
         auto nullSchema = JsonNode.emptyObject();
         nullSchema.set("type", JsonNode("null"));
         auto variants = JsonNode.emptyArray();
-        variants.append(emitTypeInline!(TemplateArgsOf!T[0], Ancestors)());
+        variants.append(emitTypeInline!(TemplateArgsOf!T[0], Ancestors)(omitNull));
         variants.append(nullSchema);
         auto s = JsonNode.emptyObject();
         s.set("anyOf", variants);
@@ -434,7 +451,7 @@ private JsonNode emitTypeInline(T, Ancestors...)()
     {
         auto variants = JsonNode.emptyArray();
         static foreach (V; TemplateArgsOf!T)
-            variants.append(emitTypeInline!(V, Ancestors)());
+            variants.append(emitTypeInline!(V, Ancestors)(omitNull));
         auto s = JsonNode.emptyObject();
         s.set("anyOf", variants);
         return s;
@@ -445,13 +462,13 @@ private JsonNode emitTypeInline(T, Ancestors...)()
                 "jsonSchemaOf: unsupported associative-array key type "
                 ~ KeyType!T.stringof ~ " in " ~ T.stringof ~ " (JSON object keys must be strings)");
         auto s = typeSchema("object");
-        s.set("additionalProperties", emitTypeInline!(ValueType!T, Ancestors)());
+        s.set("additionalProperties", emitTypeInline!(ValueType!T, Ancestors)(omitNull));
         return s;
     }
     else static if (isArray!T)
     {
         auto s = typeSchema("array");
-        s.set("items", emitTypeInline!(typeof(T.init[0]), Ancestors)());
+        s.set("items", emitTypeInline!(typeof(T.init[0]), Ancestors)(omitNull));
         return s;
     }
     else static if (is(T == struct))
@@ -466,7 +483,7 @@ private JsonNode emitTypeInline(T, Ancestors...)()
         {
             {
                 alias FT = typeof(__traits(getMember, T, field));
-                auto prop = emitTypeInline!(FT, Ancestors, T)();
+                auto prop = emitTypeInline!(FT, Ancestors, T)(omitNull);
                 applyFieldFacets!(T, field)(prop);
                 props.set(field, prop);
                 static if (!isInstanceOf!(Nullable, FT) && !hasFieldDefault!(T, i))
@@ -502,26 +519,33 @@ public void applyUdaFacets(udas...)(ref JsonNode prop)
 
     static foreach (uda; udas)
     {
-        static if (isInstanceOf!(Minimum, typeof(uda)))
-            prop.set("minimum", boundNode(uda.value));
-        else static if (isInstanceOf!(Maximum, typeof(uda)))
-            prop.set("maximum", boundNode(uda.value));
-        else static if (is(typeof(uda) == title))
-            prop.set("title", JsonNode(uda.value));
-        else static if (is(typeof(uda) == format))
-            prop.set("format", JsonNode(uda.value));
-        else static if (is(typeof(uda) == minLength))
-            prop.set("minLength", JsonNode(cast(long) uda.value));
-        else static if (is(typeof(uda) == maxLength))
-            prop.set("maxLength", JsonNode(cast(long) uda.value));
-        else static if (is(typeof(uda) == pattern))
-            prop.set("pattern", JsonNode(uda.value));
-        else static if (is(typeof(uda) == minItems))
-            prop.set("minItems", JsonNode(cast(long) uda.value));
-        else static if (is(typeof(uda) == maxItems))
-            prop.set("maxItems", JsonNode(cast(long) uda.value));
-        else static if (isInstanceOf!(SchemaDefault, typeof(uda)))
-            prop.set("default", schemaDefaultNode(uda.value));
+        // Skip type-only UDAs (e.g. a bare `enum`/`struct` marker attached to the
+        // same symbol). `typeof(uda)` is ill-formed for a type, so guarding on
+        // `!is(uda)` lets callers pass a mixed attribute set (value facets plus
+        // marker types) without a "type X is not an expression" error.
+        static if (!is(uda))
+        {
+            static if (isInstanceOf!(Minimum, typeof(uda)))
+                prop.set("minimum", boundNode(uda.value));
+            else static if (isInstanceOf!(Maximum, typeof(uda)))
+                prop.set("maximum", boundNode(uda.value));
+            else static if (is(typeof(uda) == title))
+                prop.set("title", JsonNode(uda.value));
+            else static if (is(typeof(uda) == format))
+                prop.set("format", JsonNode(uda.value));
+            else static if (is(typeof(uda) == minLength))
+                prop.set("minLength", JsonNode(cast(long) uda.value));
+            else static if (is(typeof(uda) == maxLength))
+                prop.set("maxLength", JsonNode(cast(long) uda.value));
+            else static if (is(typeof(uda) == pattern))
+                prop.set("pattern", JsonNode(uda.value));
+            else static if (is(typeof(uda) == minItems))
+                prop.set("minItems", JsonNode(cast(long) uda.value));
+            else static if (is(typeof(uda) == maxItems))
+                prop.set("maxItems", JsonNode(cast(long) uda.value));
+            else static if (isInstanceOf!(SchemaDefault, typeof(uda)))
+                prop.set("default", schemaDefaultNode(uda.value));
+        }
     }
 }
 
@@ -1140,3 +1164,86 @@ unittest  // every generated schema conforms to the 2020-12 meta-schema
         }
     }
 }
+
+unittest  // applyUdaFacets skips a type-only UDA mixed in with value facets
+{
+    import jsonschema.attributes : minimum, schemaDefault;
+
+    // A bare type in the sequence (e.g. a consumer's marker UDA like @readOnly)
+    // must be ignored, not raise "type X is not an expression".
+    struct Marker
+    {
+    }
+
+    auto node = jsonSchemaOf!int;
+    applyUdaFacets!(Marker, minimum(1), schemaDefault(2))(node);
+    assert(node.get("minimum").integer_ == 1);
+    assert(node.get("default").integer_ == 2);
+}
+
+unittest  // nullableOmitsNull renders Nullable!T as the bare inner schema
+{
+    enum Color
+    {
+        red,
+        green
+    }
+
+    enum GeneratorSettings bare = {nullableOmitsNull: true};
+
+    // Default: anyOf with a null branch.
+    auto withNull = jsonSchemaOf!(Nullable!int);
+    assert(withNull.get("anyOf") !is null);
+
+    // Flag: bare scalar, no anyOf / null branch (default-mode and inline-mode).
+    auto n = jsonSchemaOf!(Nullable!int)(bare);
+    assert(n.get("anyOf") is null);
+    assert(n.get("type").string_ == "integer");
+
+    enum GeneratorSettings bareInline = {
+        inlineSubschemas: true,
+        nullableOmitsNull: true
+        };
+        auto ni = jsonSchemaOf!(Nullable!int)(bareInline);
+        assert(ni.get("type").string_ == "integer");
+
+        // Optional enum keeps its enum constraint without a null branch.
+        auto e = jsonSchemaOf!(Nullable!Color)(bare);
+        assert(e.get("anyOf") is null);
+        assert(e.get("type").string_ == "string");
+        assert(e.get("enum").array_.length == 2);
+    }
+
+    unittest  // nullableOmitsNull applies to Nullable struct fields, keeping them optional
+    {
+        static struct Form
+        {
+            string name;
+            Nullable!int count;
+        }
+
+        enum GeneratorSettings bare = {nullableOmitsNull: true};
+        auto s = jsonSchemaOf!Form(bare);
+        // `count` is a bare integer, not anyOf[int,null]...
+        assert(s.get("properties").get("count").get("type").string_ == "integer");
+        assert(s.get("properties").get("count").get("anyOf") is null);
+        // ...and still optional (only `name` is required).
+        auto req = s.get("required").array_;
+        assert(req.length == 1 && req[0].string_ == "name");
+    }
+
+    unittest  // @schemaDefault on a Nullable struct field is emitted (anyOf path, flag off)
+    {
+        import jsonschema.attributes : schemaDefault;
+
+        static struct Form
+        {
+            @schemaDefault(1) Nullable!int page;
+        }
+
+        // Default mode keeps anyOf[int,null]; the @schemaDefault must survive on it.
+        auto s = jsonSchemaOf!Form;
+        auto page = s.get("properties").get("page");
+        assert(page.get("anyOf") !is null);
+        assert(page.get("default").integer_ == 1);
+    }
