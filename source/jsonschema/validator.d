@@ -217,6 +217,11 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             ok = false;
     }
 
+    // Flag mode discards annotations, so once invalid the boolean outcome is
+    // fixed: short-circuit between keyword groups when not collecting errors.
+    if (!st.collect && !ok)
+        return false;
+
     // --- validation: any instance type ---
     if (s.hasType && !typeMatches!A(s.typeMask, v, kind))
     {
@@ -258,6 +263,9 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         ok = false;
     }
 
+    if (!st.collect && !ok)
+        return false;
+
     // --- in-place applicators ---
     foreach (i, sub; s.allOf)
     {
@@ -265,7 +273,11 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         if (evalSchema!A(sub, v, ip, kp ~ "/allOf/" ~ i.to!string, st, se))
             ev.merge(se);
         else
+        {
             ok = false;
+            if (!st.collect)
+                return false;
+        }
     }
     if (s.anyOf.length)
     {
@@ -353,13 +365,22 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         }
     }
 
+    if (!st.collect && !ok)
+        return false;
+
     // --- objects ---
     if (kind == JsonKind.object)
         ok &= checkObject!A(s, v, ip, kp, st, ev);
 
+    if (!st.collect && !ok)
+        return false;
+
     // --- arrays ---
     if (kind == JsonKind.array)
         ok &= checkArray!A(s, v, ip, kp, st, ev);
+
+    if (!st.collect && !ok)
+        return false;
 
     // --- unevaluated*, after everything else at this location ---
     if (s.unevaluatedProperties !is null && kind == JsonKind.object)
@@ -454,26 +475,36 @@ private bool checkNumber(A)(const CompiledSchema s, in JsonNumber n, string ip,
     {
         fail(st, ip, kp ~ "/multipleOf", "instance is not a multiple of the divisor");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.hasMaximum && cmpNumbers(n, s.maximum) > 0)
     {
         fail(st, ip, kp ~ "/maximum", "instance exceeds the maximum");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.hasExclusiveMaximum && cmpNumbers(n, s.exclusiveMaximum) >= 0)
     {
         fail(st, ip, kp ~ "/exclusiveMaximum", "instance is not below the exclusive maximum");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.hasMinimum && cmpNumbers(n, s.minimum) < 0)
     {
         fail(st, ip, kp ~ "/minimum", "instance is below the minimum");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.hasExclusiveMinimum && cmpNumbers(n, s.exclusiveMinimum) <= 0)
     {
         fail(st, ip, kp ~ "/exclusiveMinimum", "instance is not above the exclusive minimum");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     return ok;
 }
@@ -491,11 +522,15 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
         {
             fail(st, ip, kp ~ "/maxLength", "string is longer than maxLength");
             ok = false;
+            if (!st.collect)
+                return false;
         }
         if (s.minLength != absent && len < s.minLength)
         {
             fail(st, ip, kp ~ "/minLength", "string is shorter than minLength");
             ok = false;
+            if (!st.collect)
+                return false;
         }
     }
     if (s.hasPattern)
@@ -521,17 +556,23 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         fail(st, ip, kp ~ "/maxProperties", "object has more than maxProperties members");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.minProperties != absent && len < s.minProperties)
     {
         fail(st, ip, kp ~ "/minProperties", "object has fewer than minProperties members");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     foreach (name; s.required)
         if (A.objectGet(v, name) is null)
         {
             fail(st, ip, kp ~ "/required", "missing required property '" ~ name ~ "'");
             ok = false;
+            if (!st.collect)
+                return false;
         }
     foreach (trigger, names; s.dependentRequired)
         if (A.objectGet(v, trigger) !is null)
@@ -541,6 +582,8 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
                     fail(st, ip, kp ~ "/dependentRequired",
                             "property '" ~ trigger ~ "' requires property '" ~ name ~ "'");
                     ok = false;
+                    if (!st.collect)
+                        return false;
                 }
     foreach (trigger, sub; s.dependentSchemas)
         if (A.objectGet(v, trigger) !is null)
@@ -549,7 +592,11 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             if (evalSchema!A(sub, v, ip, kp ~ "/dependentSchemas/" ~ escapeToken(trigger), st, se))
                 ev.merge(se);
             else
+            {
                 ok = false;
+                if (!st.collect)
+                    return false;
+            }
         }
 
     if (s.properties.length || s.patternProperties.length
@@ -597,7 +644,8 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
                 if (!evalSchema!A(s.propertyNames, nameValue, mp, kp ~ "/propertyNames", st, se))
                     failed = true;
             }
-            return 0;
+            // Flag mode: stop visiting members once one has failed.
+            return (failed && !st.collect) ? 1 : 0;
         });
         if (failed)
             ok = false;
@@ -615,11 +663,15 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         fail(st, ip, kp ~ "/maxItems", "array has more than maxItems items");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.minItems != absent && len < s.minItems)
     {
         fail(st, ip, kp ~ "/minItems", "array has fewer than minItems items");
         ok = false;
+        if (!st.collect)
+            return false;
     }
     if (s.uniqueItems && len > 1)
     {
@@ -637,6 +689,8 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
                 }
             }
         }
+        if (!ok && !st.collect)
+            return false;
     }
 
     if (s.hasPrefixItems)
@@ -651,7 +705,11 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
                     kp ~ "/prefixItems/" ~ i.to!string, st, se))
                 ev.markItem(i);
             else
+            {
                 failed = true;
+                if (!st.collect)
+                    return false;
+            }
         }
         if (failed)
             ok = false;
@@ -667,7 +725,11 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
             if (evalSchema!A(s.itemsSchema, elem, ip ~ "/" ~ i.to!string, kp ~ "/items", st, se))
                 ev.markItem(i);
             else
+            {
                 failed = true;
+                if (!st.collect)
+                    return false;
+            }
         }
         if (failed)
             ok = false;
@@ -681,11 +743,15 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.additionalItemsSchema, elem, ip ~ "/" ~ i.to!string,
-                    kp ~ "/additionalItems", st, se))
+            if (evalSchema!A(s.additionalItemsSchema, elem,
+                    ip ~ "/" ~ i.to!string, kp ~ "/additionalItems", st, se))
                 ev.markItem(i);
             else
+            {
                 failed = true;
+                if (!st.collect)
+                    return false;
+            }
         }
         if (failed)
             ok = false;
