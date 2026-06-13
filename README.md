@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Poita/jsonschema/actions/workflows/ci.yml/badge.svg)](https://github.com/Poita/jsonschema/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Poita/jsonschema/branch/master/graph/badge.svg)](https://codecov.io/gh/Poita/jsonschema)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![API docs](https://img.shields.io/badge/docs-API%20reference-blue.svg)](https://poita.github.io/jsonschema/)
 
 A complete **JSON Schema** implementation for D, in two halves:
@@ -251,4 +251,4 @@ consumer), matching the spec.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

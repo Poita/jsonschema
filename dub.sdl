@@ -1,7 +1,7 @@
 name "jsonschema"
 description "Complete JSON Schema 2020-12 validator and compile-time D-type schema generator"
 authors "Peter Alexander"
-license "Apache-2.0"
+license "MIT"
 copyright "Copyright © 2026, Peter Alexander"
 targetType "library"
 stringImportPaths "res"
