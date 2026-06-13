@@ -289,7 +289,7 @@ private JsonNode emitType(T)(ref GenContext ctx)
         static assert(false, "jsonSchemaOf: unsupported type " ~ T.stringof);
 }
 
-private JsonNode typeSchema(string typeName) pure nothrow
+private JsonNode typeSchema(string typeName) pure
 {
     auto s = JsonNode.emptyObject();
     s.set("type", JsonNode(typeName));

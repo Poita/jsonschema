@@ -159,9 +159,13 @@ struct JsonNode
     }
 
     /// Set (or replace) an object member, preserving first-insertion order.
-    void set(string key, JsonNode value) pure nothrow
+    /// Throws `JsonNodeException` if this node is not an object. The check is
+    /// enforced even in `-release` builds, so it is not `nothrow`.
+    void set(string key, JsonNode value) pure
     {
-        assert(kind == Kind.object, "set() on non-object JsonNode");
+        import std.exception : enforce;
+
+        enforce!JsonNodeException(kind == Kind.object, "set() on non-object JsonNode");
         foreach (ref m; members_)
             if (m.key == key)
             {
@@ -171,10 +175,14 @@ struct JsonNode
         members_ ~= Member(key, value);
     }
 
-    /// Append to an array node.
-    void append(JsonNode value) pure nothrow
+    /// Append to an array node. Throws `JsonNodeException` if this node is not
+    /// an array. The check is enforced even in `-release` builds, so it is not
+    /// `nothrow`.
+    void append(JsonNode value) pure
     {
-        assert(kind == Kind.array, "append() on non-array JsonNode");
+        import std.exception : enforce;
+
+        enforce!JsonNodeException(kind == Kind.array, "append() on non-array JsonNode");
         array_ ~= value;
     }
 
@@ -307,6 +315,16 @@ private bool numbersEqual(in JsonNode a, in JsonNode b) pure nothrow
         return f >= -9223372036854775808.0 && f < 9223372036854775808.0
             && cast(long) f == other.integer_;
     return f >= 0.0 && f < 18446744073709551616.0 && cast(ulong) f == other.uinteger_;
+}
+
+/// Thrown when a `JsonNode` mutator is called on a node of the wrong kind
+/// (e.g. `set` on a non-object or `append` on a non-array).
+class JsonNodeException : Exception
+{
+    this(string msg, string file = __FILE__, size_t line = __LINE__) pure nothrow
+    {
+        super(msg, file, line);
+    }
 }
 
 /// Thrown when JSON text cannot be parsed.
@@ -1113,4 +1131,20 @@ unittest  // parse error: digits followed by a stray sign or extra dot
 
     assertThrown!JsonParseException(parseJson("1-2")); // not a valid long
     assertThrown!JsonParseException(parseJson("1.2.3")); // not a valid double
+}
+
+unittest  // set on a non-object throws (enforced even in -release)
+{
+    import std.exception : assertThrown;
+
+    auto n = JsonNode.emptyArray();
+    assertThrown!JsonNodeException(n.set("a", JsonNode(1L)));
+}
+
+unittest  // append on a non-array throws (enforced even in -release)
+{
+    import std.exception : assertThrown;
+
+    auto n = JsonNode.emptyObject();
+    assertThrown!JsonNodeException(n.append(JsonNode(1L)));
 }
