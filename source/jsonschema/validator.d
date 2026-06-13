@@ -38,6 +38,10 @@ final class Validator
 
     /// Validate a `std.json.JSONValue` instance.
     ///
+    /// Total: never throws. If evaluation exceeds `ValidatorSettings.maxDepth`
+    /// (an unboundedly recursive schema), it returns an invalid result rather
+    /// than throwing — callers need only inspect `ValidationResult.valid`.
+    ///
     /// `const`: a compiled `Validator` holds no mutable state, so one instance
     /// is safe to share across threads/fibers for concurrent read-only
     /// validation. All per-call state lives in `EvalState` / `Evaluated`.
@@ -114,6 +118,7 @@ private struct EvalState(A)
     ValidationError[] errors;
     bool collect;
     bool assertFormats;
+    bool depthExceeded;
     size_t depth;
     size_t maxDepth;
 }
@@ -181,8 +186,20 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         string kp, ref EvalState!A st, ref Evaluated ev)
 {
     if (++st.depth > st.maxDepth)
-        throw new ValidationException(
-                "schema evaluation exceeded the depth limit (unboundedly recursive schema?)");
+    {
+        // Treat exceeding the depth limit (an unboundedly recursive schema) as
+        // an invalid result rather than throwing, so callers only ever inspect
+        // `ValidationResult.valid`. The flag is recorded once and suppresses
+        // deeper recursion as the stack unwinds.
+        st.depth--;
+        if (!st.depthExceeded)
+        {
+            st.depthExceeded = true;
+            fail(st, ip, kp,
+                    "schema evaluation exceeded the depth limit (unboundedly recursive schema?)");
+        }
+        return false;
+    }
     scope (exit)
         st.depth--;
 
@@ -461,6 +478,10 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
 
 private void shrinkErrors(A)(ref EvalState!A st, size_t mark) pure nothrow @trusted
 {
+    // Once the depth limit is hit, keep the synthetic depth error: it must
+    // survive the error-pruning that anyOf / not / if / contains otherwise do.
+    if (st.depthExceeded)
+        return;
     // Shrinking to a previous length only ever drops tail entries.
     st.errors.length = mark;
 }

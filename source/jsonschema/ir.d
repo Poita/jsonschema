@@ -64,8 +64,10 @@ class UnsupportedDialectException : SchemaException
     }
 }
 
-/// Validation could not run to completion (currently: the evaluation depth
-/// limit was hit, which indicates an unboundedly recursive schema).
+/// Formerly thrown when validation could not run to completion (the evaluation
+/// depth limit was hit). Validation no longer throws: exceeding the depth limit
+/// now yields an invalid `ValidationResult`. Retained for source compatibility
+/// with callers that still reference the type; nothing in the library throws it.
 class ValidationException : Exception
 {
     this(string msg, string file = __FILE__, size_t line = __LINE__) pure nothrow
@@ -168,8 +170,10 @@ struct ValidatorSettings
     /// Dialect assumed when the document carries no `$schema`.
     string defaultDialect = dialect202012;
 
-    /// Evaluation recursion limit; exceeding it throws `ValidationException`
-    /// (guards against unboundedly self-referential schemas).
+    /// Evaluation recursion limit (guards against unboundedly self-referential
+    /// schemas). Exceeding it makes validation return an invalid
+    /// `ValidationResult` — in `basic` output with a single synthetic error
+    /// noting the depth limit, in `flag` output with no error list.
     size_t maxDepth = 512;
 }
 
