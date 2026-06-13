@@ -180,6 +180,16 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     const kind = A.kindOf(v);
 
     // --- core: references (in-place applicators) ---
+    if (s.refIsExclusive)
+    {
+        // Up to draft-07, a `$ref` suppresses every sibling keyword: evaluate
+        // only the reference and adopt its annotations.
+        Evaluated sub;
+        const r = evalSchema!A(s.refInfo.target, v, ip, kp ~ "/$ref", st, sub);
+        if (r)
+            ev.merge(sub);
+        return r;
+    }
     if (s.refInfo !is null)
     {
         Evaluated sub;
@@ -655,6 +665,24 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
             const elem = A.arrayAt(v, i);
             Evaluated se;
             if (evalSchema!A(s.itemsSchema, elem, ip ~ "/" ~ i.to!string, kp ~ "/items", st, se))
+                ev.markItem(i);
+            else
+                failed = true;
+        }
+        if (failed)
+            ok = false;
+    }
+    // Pre-2020-12 `additionalItems`: only meaningful alongside a tuple `items`.
+    if (s.additionalItemsSchema !is null && s.hasPrefixItems)
+    {
+        bool failed;
+        const start = s.prefixItems.length;
+        foreach (i; start .. len)
+        {
+            const elem = A.arrayAt(v, i);
+            Evaluated se;
+            if (evalSchema!A(s.additionalItemsSchema, elem, ip ~ "/" ~ i.to!string,
+                    kp ~ "/additionalItems", st, se))
                 ev.markItem(i);
             else
                 failed = true;

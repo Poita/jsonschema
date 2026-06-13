@@ -5,13 +5,17 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![API docs](https://img.shields.io/badge/docs-API%20reference-blue.svg)](https://poita.github.io/jsonschema/)
 
-A complete **JSON Schema 2020-12** implementation for D, in two halves:
+A complete **JSON Schema** implementation for D, in two halves:
 
-1. **Validator** — compile arbitrary JSON Schema 2020-12 documents into a
-   reusable validator and validate JSON instances of multiple JSON types
+1. **Validator** — compile arbitrary JSON Schema documents into a reusable
+   validator and validate JSON instances of multiple JSON types
    (`std.json.JSONValue`, `vibe.data.json.Json`, or your own via a small
-   adapter trait). Full dialect support: `$ref`/`$dynamicRef`/`$anchor`/
-   `$dynamicAnchor`/`$vocabulary`, all applicators,
+   adapter trait). Three dialects are supported — **2020-12**, **2019-09**, and
+   **draft-07** — including cross-draft `$ref` (a schema in one dialect
+   referencing a resource in another, each processed under its own draft).
+   Full support for `$ref`/`$dynamicRef`/`$recursiveRef`/`$anchor`/
+   `$dynamicAnchor`/`$recursiveAnchor`/`$vocabulary`, all applicators
+   (including pre-2020-12 `items`/`additionalItems` tuples),
    `unevaluatedProperties`/`unevaluatedItems` with proper annotation
    collection, and opt-in format assertion.
 2. **Generator** — derive a 2020-12 schema from a D type at compile time
@@ -19,10 +23,10 @@ A complete **JSON Schema 2020-12** implementation for D, in two halves:
    shared and recursive structs.
 
 Verified against the official
-[JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite):
-**100% of required tests (1299/1299)** and **100% of non-skipped optional
-tests (645/645)**, run through *both* JSON adapters with identical outcomes
-(see [Test suite](#test-suite) for the deliberate skips).
+[JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)
+across all three dialects: **100% of required tests (3485/3485)** and **100% of
+non-skipped optional tests (1799/1799)**, run through *both* JSON adapters with
+identical outcomes (see [Test suite](#test-suite) for the deliberate skips).
 
 ## Packages
 
@@ -102,10 +106,15 @@ auto v = compileSchema(schemaText, settings);
   document's `$id`). The 2020-12 meta-schemas are bundled and pre-registered.
   The library performs no network I/O; supply `settings.resolver` if you want
   to load schemas yourself.
-- Dialects: `$schema` is honored; absent means 2020-12. Any other dialect
-  throws `UnsupportedDialectException`. Custom meta-schemas with `$vocabulary`
-  are supported, including vocabulary-gated keyword sets and the
-  format-assertion vocabulary.
+- Dialects: `$schema` is honored and selects the draft per resource (2020-12,
+  2019-09, or draft-07); absent means 2020-12 (override with
+  `settings.defaultDialect`). The meta-schemas for all three are bundled and
+  pre-registered. Any other dialect throws `UnsupportedDialectException`. Custom
+  meta-schemas with `$vocabulary` are supported, including vocabulary-gated
+  keyword sets and the format-assertion vocabulary. A `$ref` may cross dialects:
+  the target resource is processed under the draft its own `$schema` declares,
+  so e.g. `prefixItems` is an applicator in 2020-12 but an ignored unknown
+  keyword in a 2019-09 or draft-07 resource.
 - Output formats: `OutputFormat.flag` (validity only) and `OutputFormat.basic`
   (flat error list with `instanceLocation` / `keywordLocation`).
 
@@ -209,19 +218,21 @@ git submodule update --init
 dub run jsonschema:suite-runner
 ```
 
-The harness runs every draft2020-12 case — required and optional, including
-format assertions — through both adapters and prints pass/fail counts; its
-exit status fails CI on any required failure or adapter divergence.
+The harness runs every draft2020-12, draft2019-09, and draft7 case — required
+and optional, including format assertions and cross-draft references — through
+both adapters and prints per-draft and total pass/fail counts; its exit status
+fails CI on any required failure or adapter divergence.
 
 Current results:
 
-| section | passed |
-|---|---|
-| required | 1299/1299 (100%) |
-| optional (non-skipped) | 645/645 (100%) |
-| deliberately skipped | 153 |
+| dialect | required | optional (non-skipped) | skipped |
+|---|---|---|---|
+| 2020-12 | 1299/1299 (100%) | 646/646 (100%) | 152 |
+| 2019-09 | 1259/1259 (100%) | 634/634 (100%) | 152 |
+| draft-07 | 927/927 (100%) | 519/519 (100%) | 161 |
+| **total** | **3485/3485 (100%)** | **1799/1799 (100%)** | **465** |
 
-Deliberate skips (all in optional sections):
+Deliberate skips (all in optional sections), applied to every draft:
 
 - `optional/format/idn-hostname.json`, `optional/format/idn-email.json` —
   IDNA / RFC 5891 internationalized hostnames and addresses (would require
@@ -230,9 +241,10 @@ Deliberate skips (all in optional sections):
   host names" — punycode-decoding label semantics, same territory.
 - `optional/format/iri.json`, `optional/format/iri-reference.json` —
   internationalized resource identifiers.
-- `optional/cross-draft.json` — references into draft-07 schemas (draft-07
-  support is a possible future addition; the dialect detection and
-  per-resource vocabulary machinery already accommodate it).
+- draft-07 only: `optional/content.json` — these cases expect
+  `contentEncoding`/`contentMediaType` to *assert*; this library treats the
+  `content` keywords as annotations in every draft (the 2019-09 / 2020-12
+  position), so the invalid-content cases would not be reported as failures.
 
 Unknown `format` names always pass (they are annotations for some other
 consumer), matching the spec.

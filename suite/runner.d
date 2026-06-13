@@ -22,12 +22,30 @@ import std.stdio : writefln, writeln;
 import vibe.data.json : parseJsonString, VibeJson = Json;
 
 enum suiteRoot = "tests/JSON-Schema-Test-Suite";
-enum testsDir = suiteRoot ~ "/tests/draft2020-12";
 enum remotesDir = suiteRoot ~ "/remotes";
 enum remoteBase = "http://localhost:1234/";
 
+/// One draft to run: its test directory and the dialect assumed for schemas
+/// that carry no `$schema` of their own.
+struct DraftRun
+{
+    string name;
+    string dir;
+    string defaultDialect;
+}
+
+immutable DraftRun[] drafts = [
+    DraftRun("draft2020-12", suiteRoot ~ "/tests/draft2020-12",
+        "https://json-schema.org/draft/2020-12/schema"),
+    DraftRun("draft2019-09", suiteRoot ~ "/tests/draft2019-09",
+        "https://json-schema.org/draft/2019-09/schema"),
+    DraftRun("draft7", suiteRoot ~ "/tests/draft7",
+        "http://json-schema.org/draft-07/schema#"),
+];
+
 struct CaseResult
 {
+    string draft; // draft directory name
     string file; // relative to the draft directory
     string group; // schema description
     string test; // test description
@@ -37,73 +55,95 @@ struct CaseResult
     string error; // exception text, if compilation/validation threw
 }
 
+/// Running per-draft tallies, printed as a summary at the end.
+struct Stats
+{
+    size_t reqPass, reqFail, optPass, optFail, skipped;
+}
+
 int main()
 {
-    if (!exists(testsDir))
-    {
-        writeln("test suite not found at ", testsDir, " — run: git submodule update --init");
-        return 2;
-    }
-
     auto store = makeRemoteStore();
 
     size_t reqPass, reqFail, optPass, optFail, skipped, divergences;
+    Stats[string] perDraft;
     CaseResult[] failures;
 
-    auto files = dirEntries(testsDir, "*.json", SpanMode.depth).array;
-    sort!((a, b) => a.name < b.name)(files);
-
-    foreach (entry; files)
+    foreach (draft; drafts)
     {
-        const rel = entry.name[testsDir.length + 1 .. $];
-        const optional = rel.startsWith("optional");
-        const text = readText(entry.name);
-        auto groups = parseJson(text);
-
-        foreach (ref g; groups.array_)
+        perDraft[draft.name] = Stats.init;
+        if (!exists(draft.dir))
         {
-            const groupDesc = g.get("description").string_;
-            auto schemaNode = *g.get("schema");
-            foreach (ref t; g.get("tests").array_)
+            writeln("test suite not found at ", draft.dir, " — run: git submodule update --init");
+            return 2;
+        }
+
+        auto files = dirEntries(draft.dir, "*.json", SpanMode.depth).array;
+        sort!((a, b) => a.name < b.name)(files);
+
+        foreach (entry; files)
+        {
+            const rel = entry.name[draft.dir.length + 1 .. $];
+            const optional = rel.startsWith("optional");
+            const text = readText(entry.name);
+            auto groups = parseJson(text);
+
+            foreach (ref g; groups.array_)
             {
-                const testDesc = t.get("description").string_;
-                const expected = t.get("valid").boolean_;
-                auto dataNode = *t.get("data");
-
-                CaseResult r;
-                r.file = rel;
-                r.group = groupDesc;
-                r.test = testDesc;
-                r.expected = expected;
-
-                if (isDeliberateSkip(rel, groupDesc))
+                const groupDesc = g.get("description").string_;
+                auto schemaNode = *g.get("schema");
+                foreach (ref t; g.get("tests").array_)
                 {
-                    skipped++;
-                    continue;
-                }
-                runCase(rel, text, schemaNode, dataNode, store, r);
+                    const testDesc = t.get("description").string_;
+                    const expected = t.get("valid").boolean_;
+                    auto dataNode = *t.get("data");
 
-                const pass = r.stdGot == expected && r.vibeGot == expected && r.error.length == 0;
-                if (r.stdGot != r.vibeGot)
-                    divergences++;
-                if (optional)
-                {
-                    if (pass)
-                        optPass++;
-                    else
+                    CaseResult r;
+                    r.draft = draft.name;
+                    r.file = rel;
+                    r.group = groupDesc;
+                    r.test = testDesc;
+                    r.expected = expected;
+
+                    if (isDeliberateSkip(draft.name, rel, groupDesc))
                     {
-                        optFail++;
-                        failures ~= r;
+                        skipped++;
+                        perDraft[draft.name].skipped++;
+                        continue;
                     }
-                }
-                else
-                {
-                    if (pass)
-                        reqPass++;
+                    runCase(draft, rel, schemaNode, dataNode, store, r);
+
+                    const pass = r.stdGot == expected && r.vibeGot == expected
+                        && r.error.length == 0;
+                    if (r.stdGot != r.vibeGot)
+                        divergences++;
+                    if (optional)
+                    {
+                        if (pass)
+                        {
+                            optPass++;
+                            perDraft[draft.name].optPass++;
+                        }
+                        else
+                        {
+                            optFail++;
+                            perDraft[draft.name].optFail++;
+                            failures ~= r;
+                        }
+                    }
                     else
                     {
-                        reqFail++;
-                        failures ~= r;
+                        if (pass)
+                        {
+                            reqPass++;
+                            perDraft[draft.name].reqPass++;
+                        }
+                        else
+                        {
+                            reqFail++;
+                            perDraft[draft.name].reqFail++;
+                            failures ~= r;
+                        }
                     }
                 }
             }
@@ -114,10 +154,17 @@ int main()
     {
         writeln("--- failures ---");
         foreach (f; failures)
-            writefln("%s | %s | %s | expected=%s std=%s vibe=%s%s", f.file,
+            writefln("%s/%s | %s | %s | expected=%s std=%s vibe=%s%s", f.draft, f.file,
                     f.group, f.test, f.expected, f.stdGot, f.vibeGot,
                     f.error.length ? " | " ~ f.error : "");
         writeln();
+    }
+
+    foreach (draft; drafts)
+    {
+        const s = perDraft[draft.name];
+        writefln("[%s] required %d/%d, optional %d/%d, skipped %d", draft.name,
+                s.reqPass, s.reqPass + s.reqFail, s.optPass, s.optPass + s.optFail, s.skipped);
     }
 
     const reqTotal = reqPass + reqFail;
@@ -132,10 +179,15 @@ int main()
     return (reqFail || divergences) ? 1 : 0;
 }
 
-/// Deliberately unsupported territory, documented in the README: IDNA /
-/// punycode-aware hostname semantics, internationalized resource identifiers,
-/// and historic-draft cross-references.
-bool isDeliberateSkip(string rel, string group)
+/// Deliberately unsupported territory, documented in the README.
+///
+/// Applied to every draft: IDNA / punycode-aware hostname semantics and
+/// internationalized resource identifiers (would require Unicode IDNA tables).
+/// Draft-07-only: its optional `content` tests expect `contentEncoding` /
+/// `contentMediaType` to assert; this library treats `content` keywords as
+/// annotations in every draft (the 2019-09 / 2020-12 position), so the
+/// invalid-content cases are skipped rather than mis-reported.
+bool isDeliberateSkip(string draftName, string rel, string group)
 {
     switch (rel)
     {
@@ -146,20 +198,22 @@ bool isDeliberateSkip(string rel, string group)
         return true;
     case "optional/format/hostname.json":
         return group == "validation of A-label (punycode) host names";
-    case "optional/cross-draft.json":
-        return true;
+    case "optional/content.json":
+        return draftName == "draft7";
     default:
         return false;
     }
 }
 
 /// Decide settings per file: format tests under optional/format/ run with
-/// assertion enabled; everything else uses the spec default (annotation).
-void runCase(string rel, string fileText, in JsonNode schemaNode,
+/// assertion enabled; everything else uses the spec default (annotation). The
+/// draft directory fixes the dialect for schemas that omit `$schema`.
+void runCase(in DraftRun draft, string rel, in JsonNode schemaNode,
         in JsonNode dataNode, SchemaStore store, ref CaseResult r)
 {
     ValidatorSettings settings;
     settings.store = store;
+    settings.defaultDialect = draft.defaultDialect;
     if (rel.startsWith("optional/format/"))
         settings.formatMode = FormatMode.assertion;
 

@@ -85,6 +85,7 @@ private Frame[] extend(Frame[] frames, string segment) pure nothrow
 
 // --- dialect / vocabulary handling ---
 
+// 2020-12 vocabulary URIs.
 private enum vocabCore = "https://json-schema.org/draft/2020-12/vocab/core";
 private enum vocabApplicator = "https://json-schema.org/draft/2020-12/vocab/applicator";
 private enum vocabUnevaluated = "https://json-schema.org/draft/2020-12/vocab/unevaluated";
@@ -94,52 +95,117 @@ private enum vocabFormatAnnotation = "https://json-schema.org/draft/2020-12/voca
 private enum vocabFormatAssertion = "https://json-schema.org/draft/2020-12/vocab/format-assertion";
 private enum vocabContent = "https://json-schema.org/draft/2020-12/vocab/content";
 
-/// Determine the vocabulary set for a dialect URI. The standard 2020-12 URI
-/// maps directly; any other URI must name a registered meta-schema document,
-/// whose `$vocabulary` is honored. Unknown dialects are refused.
-package Vocabularies vocabulariesFor(Session sess, string dialectUri)
+// 2019-09 vocabulary URIs. 2019-09 has no separate "unevaluated" vocabulary —
+// `unevaluatedItems`/`unevaluatedProperties` live in the applicator vocabulary —
+// and a single "format" vocabulary (annotation only).
+private enum vocab19Core = "https://json-schema.org/draft/2019-09/vocab/core";
+private enum vocab19Applicator = "https://json-schema.org/draft/2019-09/vocab/applicator";
+private enum vocab19Validation = "https://json-schema.org/draft/2019-09/vocab/validation";
+private enum vocab19MetaData = "https://json-schema.org/draft/2019-09/vocab/meta-data";
+private enum vocab19Format = "https://json-schema.org/draft/2019-09/vocab/format";
+private enum vocab19Content = "https://json-schema.org/draft/2019-09/vocab/content";
+
+/// A dialect resolved to the draft it belongs to and the vocabulary set in
+/// effect for resources declaring it.
+package struct DialectInfo
+{
+    Draft draft;
+    Vocabularies vocab;
+}
+
+/// Map a well-known dialect URI to its draft, or 2020-12 for an unknown URI.
+package Draft draftOf(string dialectUri) pure nothrow
+{
+    switch (dialectUri)
+    {
+    case dialect201909:
+        return Draft.draft2019_09;
+    case dialect07:
+    case "http://json-schema.org/draft-07/schema":
+        return Draft.draft07;
+    default:
+        return Draft.draft2020_12;
+    }
+}
+
+/// The default vocabulary set for a draft, used for the standard dialects and
+/// for custom meta-schemas that omit `$vocabulary`.
+private Vocabularies defaultVocabularies(Draft draft) pure nothrow
+{
+    Vocabularies v; // init: every capability on except format-assertion
+    if (draft == Draft.draft07)
+        v.unevaluated = false; // draft-07 has no unevaluated* keywords
+    return v;
+}
+
+/// Determine the draft and vocabulary set for a dialect URI. The standard
+/// 2020-12 / 2019-09 / draft-07 URIs map directly; any other URI must name a
+/// registered meta-schema document, whose `$schema` fixes the draft family and
+/// whose `$vocabulary` (when present) is honored. Unknown dialects are refused.
+package DialectInfo dialectInfoFor(Session sess, string dialectUri)
 {
     if (dialectUri == dialect202012 || dialectUri == "")
-        return Vocabularies.init;
+        return DialectInfo(Draft.draft2020_12, defaultVocabularies(Draft.draft2020_12));
+    if (dialectUri == dialect201909)
+        return DialectInfo(Draft.draft2019_09, defaultVocabularies(Draft.draft2019_09));
+    if (dialectUri == dialect07 || dialectUri == "http://json-schema.org/draft-07/schema")
+        return DialectInfo(Draft.draft07, defaultVocabularies(Draft.draft07));
 
     string base, frag;
     splitFragment(dialectUri, base, frag);
     auto doc = sess.store.lookup(base);
     if (doc is null)
         throw new UnsupportedDialectException(dialectUri);
+
+    // The meta-schema's own `$schema` fixes which draft (and thus which
+    // vocabulary keywords behave as) the dialect belongs to.
+    Draft metaDraft = Draft.draft2020_12;
+    if (auto s = doc.get("$schema"))
+        if (s.isString)
+            metaDraft = draftOf(s.string_);
+
     auto vocabNode = doc.get("$vocabulary");
     if (vocabNode is null || !vocabNode.isObject)
-        return Vocabularies.init; // custom meta-schema without $vocabulary: full 2020-12 set
+        return DialectInfo(metaDraft, defaultVocabularies(metaDraft));
 
-    Vocabularies v;
-    v = Vocabularies(false, false, false, false, false, false, false, false);
+    Vocabularies v = Vocabularies(false, false, false, false, false, false, false, false);
     foreach (ref m; vocabNode.members_)
     {
         const required = m.value.isBoolean && m.value.boolean_;
         switch (m.key)
         {
         case vocabCore:
+        case vocab19Core:
             v.core = true;
             break;
         case vocabApplicator:
             v.applicator = true;
             break;
+        case vocab19Applicator:
+            // 2019-09 folds the unevaluated* keywords into the applicator vocab.
+            v.applicator = true;
+            v.unevaluated = true;
+            break;
         case vocabUnevaluated:
             v.unevaluated = true;
             break;
         case vocabValidation:
+        case vocab19Validation:
             v.validation = true;
             break;
         case vocabMetaData:
+        case vocab19MetaData:
             v.metaData = true;
             break;
         case vocabFormatAnnotation:
+        case vocab19Format:
             v.formatAnnotation = true;
             break;
         case vocabFormatAssertion:
             v.formatAssertion = true;
             break;
         case vocabContent:
+        case vocab19Content:
             v.content = true;
             break;
         default:
@@ -150,7 +216,7 @@ package Vocabularies vocabulariesFor(Session sess, string dialectUri)
     }
     if (!v.core)
         throw new UnsupportedDialectException(dialectUri);
-    return v;
+    return DialectInfo(metaDraft, v);
 }
 
 private string dialectOf(in JsonNode doc, string fallback) pure
@@ -190,10 +256,13 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
     if (n.isBoolean)
     {
         if (frames.length == 0)
+        {
+            const di = dialectInfoFor(sess, sess.settings.defaultDialect);
             frames = [
-            Frame(newResource(sess, rootBase, dialect202012,
-                    vocabulariesFor(sess, sess.settings.defaultDialect), n), "")
-        ];
+                Frame(newResource(sess, rootBase, sess.settings.defaultDialect,
+                        di.draft, di.vocab, n), "")
+            ];
+        }
         auto s = new CompiledSchema;
         s.isBoolean = true;
         s.boolValue = n.boolean_;
@@ -204,13 +273,34 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
         throw new SchemaCompileException("schema must be an object or boolean" ~ (
                 frames.length ? " at " ~ frames[$ - 1].ptr : ""));
 
-    // Resource boundary: document root, or an object with `$id`.
-    const idNode = n.get("$id");
-    if (frames.length == 0 || idNode !is null)
+    // The draft in scope for this node (its own `$schema` at the root, else the
+    // parent resource's) determines how `$id` and a sibling `$ref` interact.
+    const enclosingDraft = frames.length == 0
+        ? draftOf(dialectOf(n, sess.settings.defaultDialect)) : frames[$ - 1].res.draft;
+
+    // Up to draft-07 a sibling `$ref` suppresses `$id` entirely (no base change
+    // and no anchor): the `$ref` resolves against the enclosing base URI.
+    const idNode = (enclosingDraft <= Draft.draft07 && n.get("$ref") !is null)
+        ? null : n.get("$id");
+
+    // In drafts up to draft-07 a plain-fragment `$id` ("#name") is a
+    // location-independent identifier (the predecessor of `$anchor`); it names
+    // the current schema without opening a new resource / base URI.
+    string anchorFromId;
+    bool idIsAnchorOnly;
+    if (idNode !is null && idNode.isString && enclosingDraft <= Draft.draft07
+            && idNode.string_.length && idNode.string_[0] == '#')
+    {
+        anchorFromId = idNode.string_[1 .. $];
+        idIsAnchorOnly = true;
+    }
+
+    // Resource boundary: document root, or an object with a base-changing `$id`.
+    if (frames.length == 0 || (idNode !is null && !idIsAnchorOnly))
     {
         string dialect = dialectOf(n, frames.length == 0
                 ? sess.settings.defaultDialect : frames[$ - 1].res.dialectUri);
-        auto vocab = vocabulariesFor(sess, dialect);
+        auto di = dialectInfoFor(sess, dialect);
 
         string baseUri = frames.length == 0 ? rootBase : frames[$ - 1].res.uri;
         string uri = baseUri;
@@ -222,15 +312,25 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
             string b, f;
             splitFragment(uri, b, f);
             if (f.length)
-                throw new SchemaCompileException("$id must not contain a fragment: " ~ uri);
+            {
+                // draft-07 tolerates a fragment on a base-changing `$id`; it
+                // doubles as a plain-name anchor. Later drafts forbid it.
+                if (di.draft <= Draft.draft07)
+                    anchorFromId = f;
+                else
+                    throw new SchemaCompileException(
+                            "$id must not contain a fragment: " ~ uri);
+            }
             uri = b;
         }
-        auto res = newResource(sess, uri, dialect, vocab, n);
+        auto res = newResource(sess, uri, dialect, di.draft, di.vocab, n);
         frames ~= Frame(res, "");
     }
 
     auto s = new CompiledSchema;
     registerSchema(frames, s);
+    if (anchorFromId.length)
+        frames[$ - 1].res.anchors[anchorFromId] = s;
     const vocab = frames[$ - 1].res.vocab;
     auto res = frames[$ - 1].res;
 
@@ -261,11 +361,12 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
 }
 
 private SchemaResource newResource(Session sess, string uri, string dialect,
-        Vocabularies vocab, in JsonNode rawRoot) pure nothrow
+        Draft draft, Vocabularies vocab, in JsonNode rawRoot) pure nothrow
 {
     auto res = new SchemaResource;
     res.uri = uri;
     res.dialectUri = dialect;
+    res.draft = draft;
     res.vocab = vocab;
     res.rawRoot = rawRoot.clone;
     if (uri !in sess.resources)
@@ -309,15 +410,47 @@ private bool compileCoreKeyword(Session sess, CompiledSchema s,
     case "$ref":
         requireString(val, "$ref");
         s.refInfo = makeRef(sess, res, val.string_, false);
+        // Up to draft-07, `$ref` suppresses every sibling keyword.
+        if (res.draft <= Draft.draft07)
+            s.refIsExclusive = true;
         return true;
     case "$dynamicRef":
         requireString(val, "$dynamicRef");
         s.dynRefInfo = makeRef(sess, res, val.string_, true);
         return true;
+    case "$recursiveRef":
+        // 2019-09 predecessor of `$dynamicRef`: always "#", resolved against
+        // the outermost in-scope `$recursiveAnchor`.
+        requireString(val, "$recursiveRef");
+        s.dynRefInfo = makeRef(sess, res, val.string_, true);
+        s.dynRefInfo.recursive = true;
+        return true;
+    case "$recursiveAnchor":
+        // 2019-09: a boolean marker (not a name) on a resource root. Modelled
+        // as a dynamic anchor under the implicit empty name.
+        if (!val.isBoolean)
+            throw new SchemaCompileException("$recursiveAnchor must be a boolean");
+        if (val.boolean_)
+        {
+            res.dynamicAnchors[""] = s;
+            s.hasDynamicAnchor = true;
+            s.dynamicAnchorName = "";
+        }
+        return true;
     case "$defs":
         requireObject(val, "$defs");
         foreach (ref dm; val.members_)
             walk(sess, dm.value, frames.extend("/$defs/" ~ escapeToken(dm.key)), null);
+        return true;
+    case "definitions":
+        // The pre-2019 name for `$defs`, retained in 2019-09 for compatibility.
+        // Walked so embedded `$id`/`$anchor`/`$ref` targets register; in 2020-12
+        // it is not a keyword (left to compile lazily on reference).
+        if (res.draft == Draft.draft2020_12)
+            return false;
+        requireObject(val, "definitions");
+        foreach (ref dm; val.members_)
+            walk(sess, dm.value, frames.extend("/definitions/" ~ escapeToken(dm.key)), null);
         return true;
     default:
         return false;
@@ -360,6 +493,9 @@ private bool compileApplicatorKeyword(Session sess, CompiledSchema s, string key
         s.elseSchema = walk(sess, val, frames.extend("/else"), null);
         return true;
     case "dependentSchemas":
+        // Introduced in 2019-09; ignored as an unknown keyword in draft-07.
+        if (frames[$ - 1].res.draft <= Draft.draft07)
+            return false;
         requireObject(val, key);
         foreach (ref m; val.members_)
             s.dependentSchemas[m.key] = walk(sess, m.value,
@@ -411,11 +547,30 @@ private bool compileApplicatorKeyword(Session sess, CompiledSchema s, string key
         s.propertyNames = walk(sess, val, frames.extend("/propertyNames"), null);
         return true;
     case "prefixItems":
+        // A 2020-12 keyword only; ignored (an unknown keyword) in older drafts,
+        // which is exactly what cross-draft references rely on.
+        if (frames[$ - 1].res.draft != Draft.draft2020_12)
+            return false;
         s.prefixItems = walkArray(sess, val, frames, key);
         s.hasPrefixItems = true;
         return true;
     case "items":
-        s.itemsSchema = walk(sess, val, frames.extend("/items"), null);
+        // Pre-2020-12, an array `items` is a tuple (the role `prefixItems` took
+        // over in 2020-12); a single schema applies to every item.
+        if (frames[$ - 1].res.draft != Draft.draft2020_12 && val.isArray)
+        {
+            s.prefixItems = walkArray(sess, val, frames, key);
+            s.hasPrefixItems = true;
+        }
+        else
+            s.itemsSchema = walk(sess, val, frames.extend("/items"), null);
+        return true;
+    case "additionalItems":
+        // Pre-2020-12 companion to a tuple `items`; applies to items beyond the
+        // tuple. Not a keyword in 2020-12 (left for `items` to cover the rest).
+        if (frames[$ - 1].res.draft == Draft.draft2020_12)
+            return false;
+        s.additionalItemsSchema = walk(sess, val, frames.extend("/additionalItems"), null);
         return true;
     case "contains":
         s.containsSchema = walk(sess, val, frames.extend("/contains"), null);
@@ -557,6 +712,10 @@ private bool compileValidationKeyword(CompiledSchema s, string key, in JsonNode 
         }
         return true;
     case "dependentRequired":
+        // Introduced in 2019-09; in draft-07 it is an unknown keyword (the
+        // combined `dependencies` covered this), so leave it to be ignored.
+        if (s.resource.draft <= Draft.draft07)
+            return false;
         requireObject(val, key);
         foreach (ref m; val.members_)
         {
@@ -801,7 +960,15 @@ private void resolveRef(Session sess, SchemaRef r)
     }
 
     r.target = target;
-    if (r.dynamic && anchorName.length)
+    if (r.recursive)
+    {
+        // `$recursiveRef` redirects to the dynamic scope only when its target
+        // resource itself carries `$recursiveAnchor: true` (the empty-name
+        // dynamic anchor); otherwise it behaves as a plain `$ref`.
+        r.anchorName = "";
+        r.dynamicCandidate = ("" in res.dynamicAnchors) !is null;
+    }
+    else if (r.dynamic && anchorName.length)
     {
         r.anchorName = anchorName;
         auto dyn = anchorName in res.dynamicAnchors;
