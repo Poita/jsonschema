@@ -422,10 +422,18 @@ unittest  // instances can be JsonNode or JSONValue with identical results
 
 unittest  // a deeply self-referential schema hits the depth guard, not a crash
 {
-    import std.exception : assertThrown;
-
     auto v = compileSchema(`{"$ref": "#"}`);
-    assertThrown!ValidationException(v.validate(parseJSON(`1`)));
+    const r = v.validate(parseJSON(`1`));
+    assert(!r.valid);
+    import std.algorithm : canFind;
+
+    assert(r.errors.canFind!(e => e.message.canFind("depth limit")));
+}
+
+unittest  // the depth guard also reports invalid in flag-output mode (no error list)
+{
+    auto v = compileSchema(`{"$ref": "#"}`);
+    assert(!v.isValid(parseJSON(`1`)));
 }
 
 unittest  // applyUdaFacets is public: external callers fold facets onto non-field symbols
