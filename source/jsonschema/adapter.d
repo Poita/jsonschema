@@ -399,3 +399,69 @@ unittest  // JsonNodeAdapter mirrors the node values
     assert(A.getNumber(A.arrayAt(*a, 1)).f == 2.5);
     assert(A.getString(*A.objectGet(v, "b")) == "x");
 }
+
+unittest  // JsonNumber.asDouble across all three representations
+{
+    assert(JsonNumber.ofLong(-3).asDouble == -3.0);
+    assert(JsonNumber.ofDouble(2.5).asDouble == 2.5);
+    // ulong.max keeps the unsigned representation (it exceeds long.max).
+    auto u = JsonNumber.ofULong(ulong.max);
+    assert(u.rep == JsonNumber.Rep.unsigned_);
+    assert(u.asDouble == cast(double) ulong.max);
+}
+
+unittest  // StdJsonAdapter reads booleans and short-circuits objectEach
+{
+    import std.json : parseJSON;
+
+    assert(StdJsonAdapter.getBoolean(parseJSON("true")) == true);
+    assert(StdJsonAdapter.getBoolean(parseJSON("false")) == false);
+
+    auto v = parseJSON(`{"a":1,"b":2,"c":3}`);
+    int seen;
+    const r = StdJsonAdapter.objectEach(v, (string k, in JSONValue val) {
+        seen++;
+        return k == "a" || k == "b" || k == "c" ? 7 : 0; // stop on the first key
+    });
+    assert(r == 7);
+    assert(seen == 1); // early return halted iteration
+}
+
+unittest  // JsonNodeAdapter classifies null, boolean and floating kinds
+{
+    import jsonschema.node : parseJson;
+
+    alias A = JsonNodeAdapter;
+    assert(A.kindOf(parseJson("null")) == JsonKind.null_);
+    assert(A.kindOf(parseJson("true")) == JsonKind.boolean);
+    assert(A.kindOf(parseJson("1.5")) == JsonKind.floating);
+}
+
+unittest  // JsonNodeAdapter scalar accessors and unsigned numbers
+{
+    import jsonschema.node : parseJson;
+
+    alias A = JsonNodeAdapter;
+    assert(A.getBoolean(parseJson("true")) == true);
+    assert(A.ofString("k").kind == JsonNode.Kind.string_);
+
+    auto big = parseJson("18446744073709551615"); // uinteger kind
+    auto n = A.getNumber(big);
+    assert(n.rep == JsonNumber.Rep.unsigned_);
+    assert(n.u == ulong.max);
+}
+
+unittest  // JsonNodeAdapter.objectEach short-circuits on a non-zero result
+{
+    import jsonschema.node : parseJson;
+
+    alias A = JsonNodeAdapter;
+    auto v = parseJson(`{"a":1,"b":2,"c":3}`);
+    int seen;
+    const r = A.objectEach(v, (string k, in JsonNode val) {
+        seen++;
+        return 5; // stop immediately
+    });
+    assert(r == 5);
+    assert(seen == 1);
+}

@@ -959,3 +959,142 @@ unittest  // unknown formats pass
 {
     assert(checkFormat("not-a-real-format", "anything"));
 }
+
+unittest  // checkFormat dispatches to every known format
+{
+    assert(checkFormat("date-time", "1963-06-19T08:30:06Z"));
+    assert(!checkFormat("date-time", "nope"));
+    assert(checkFormat("date", "1963-06-19"));
+    assert(!checkFormat("date", "nope"));
+    assert(checkFormat("time", "08:30:06Z"));
+    assert(!checkFormat("time", "nope"));
+    assert(checkFormat("duration", "P1D"));
+    assert(!checkFormat("duration", "nope"));
+    assert(checkFormat("email", "a@b.com"));
+    assert(!checkFormat("email", "nope"));
+    assert(checkFormat("hostname", "example.com"));
+    assert(!checkFormat("hostname", "-bad-"));
+    assert(checkFormat("ipv4", "127.0.0.1"));
+    assert(!checkFormat("ipv4", "999.0.0.1"));
+    assert(checkFormat("ipv6", "::1"));
+    assert(!checkFormat("ipv6", "::laptop"));
+    assert(checkFormat("uri", "http://x.y/"));
+    assert(!checkFormat("uri", "//relative"));
+    assert(checkFormat("uri-reference", "/abc"));
+    assert(!checkFormat("uri-reference", "\\bad"));
+    assert(checkFormat("uuid", "2eb8aa08-aa98-11ea-b4aa-73b441d16380"));
+    assert(!checkFormat("uuid", "nope"));
+    assert(checkFormat("regex", "^a*$"));
+    assert(!checkFormat("regex", "^(a]"));
+    assert(checkFormat("json-pointer", "/a/b"));
+    assert(!checkFormat("json-pointer", "a"));
+    assert(checkFormat("relative-json-pointer", "1/a"));
+    assert(!checkFormat("relative-json-pointer", "/a"));
+    assert(checkFormat("uri-template", "/{var}"));
+    assert(!checkFormat("uri-template", "/{var"));
+}
+
+unittest  // date rejects non-digit components
+{
+    assert(!isDate("abcd-06-19"));
+    assert(!isDate("1963-ab-19"));
+    assert(!isDate("1963-06-cd"));
+}
+
+unittest  // time: malformed separators, fractions, and offsets
+{
+    assert(!isTime("0a:30:06Z")); // non-digit
+    assert(!isTime("08-30-06Z")); // wrong separators
+    assert(!isTime("08:30:06.Z")); // empty fraction
+    assert(!isTime("08:30:06.5")); // fraction but no zone
+    assert(!isTime("08:30:06")); // too short for any zone
+    assert(!isTime("08:30:06x")); // junk where a zone is expected
+    assert(!isTime("08:30:06Zx")); // trailing junk after Z
+    assert(!isTime("08:30:06+0020")); // missing offset colon
+    assert(!isTime("08:30:06+aa:bb")); // non-digit offset
+    assert(!isTime("08:30:06+24:00")); // offset hour out of range
+    assert(isTime("08:30:06.283Z")); // valid fraction + zone
+}
+
+unittest  // date-time rejects strings too short or missing the T separator
+{
+    assert(!isDateTime("2020")); // too short
+    assert(!isDateTime("1963-06-19X08:30:06Z")); // no T/t at position 10
+}
+
+unittest  // duration: incomplete and mis-ordered forms
+{
+    assert(!isDuration("P1")); // digit with no unit
+    assert(!isDuration("PT1Y")); // a date unit in the time section
+    assert(!isDuration("PT")); // empty time section
+    assert(isDuration("P1Y2M3D")); // properly ordered date units
+    assert(isDuration("PT1H2M3S")); // properly ordered time units
+}
+
+unittest  // email: quoted local parts, escapes, and invalid characters
+{
+    assert(isEmail(`"a\"b"@example.com`)); // escaped quote inside quotes
+    assert(!isEmail(`"unterminated@example.com`)); // no closing quote
+    assert(!isEmail("a b@example.com")); // space outside quotes (not atext)
+    // Every atext special character is accepted in a dot-string local part.
+    assert(isEmail("a!#$%&'*+-/=?^_`{|}~b@example.com"));
+}
+
+unittest  // uuid: wrong separators and non-hex digits
+{
+    assert(!isUuid("2eb8aa08xaa98-11ea-b4aa-73b441d16380")); // wrong separator
+    assert(!isUuid("2eb8aa0g-aa98-11ea-b4aa-73b441d16380")); // non-hex digit
+}
+
+unittest  // regex: escape-letter validation
+{
+    assert(isRegex(`\d\w\s\b`)); // permitted letter escapes
+    assert(!isRegex(`\q`)); // 'q' is not a permitted letter escape
+    assert(isRegex(`\.`)); // non-letter escape is allowed
+}
+
+unittest  // ipv6: embedded IPv4 tail and group-count edges
+{
+    assert(isIpv6("::ffff:1.2.3.4")); // IPv4 tail counts as two groups
+    assert(!isIpv6("1::2::3")); // a second "::" is invalid
+    assert(!isIpv6("1:2:3:4:5:6:7:8:9")); // too many groups
+    assert(!isIpv6("12345::")); // group longer than 4 hex digits
+    assert(!isIpv6("xyz::")); // non-hex characters
+    assert(!isIpv6("1::2:3:4:5:6:7:8")); // compressed yet already full
+}
+
+unittest  // uri: percent escapes, IP-literals, and bracket placement
+{
+    assert(isUri("http://x/%20path", false)); // valid percent escape
+    assert(!isUri("http://x/%2", false)); // truncated percent escape
+    assert(!isUri("http://x/%zz", false)); // non-hex percent escape
+    assert(isUri("http://[::1]:80/", false)); // IPv6 literal with port
+    assert(!isUri("http://]bad/", false)); // bracket outside an IP-literal
+    assert(isUri("http://[v1.future]/", false)); // IPvFuture literal
+    assert(!isUri("http://[::zz]/", false)); // invalid IPv6 in literal
+    assert(!isUri("http://[unterminated/", false)); // no closing bracket
+    assert(!isUri("http://x:az/", false)); // non-digit port
+}
+
+unittest  // relative-json-pointer with a trailing index marker and pointer tail
+{
+    assert(isRelativeJsonPointer("2#")); // ends with the index marker
+    assert(!isRelativeJsonPointer("2#x")); // junk after the marker
+    assert(isRelativeJsonPointer("0")); // a single zero is valid
+    assert(isRelativeJsonPointer("3/a/b")); // followed by a JSON pointer
+}
+
+unittest  // uri-template: operators, modifiers, and malformed expressions
+{
+    assert(isUriTemplate("{+path}")); // reserved-expansion operator
+    assert(isUriTemplate("{x,y}")); // multiple variables
+    assert(isUriTemplate("{x:3}")); // prefix modifier
+    assert(isUriTemplate("{x*}")); // explode modifier
+    assert(!isUriTemplate("{}")); // empty expression
+    assert(!isUriTemplate("{,x}")); // leading comma (empty varname)
+    assert(!isUriTemplate("{x:}")); // colon with no length
+    assert(!isUriTemplate("{x y}")); // illegal character in expression
+    assert(!isUriTemplate("a}b")); // a closing brace with no opener
+    assert(!isUriTemplate("{a{b}")); // nested opening brace
+    assert(!isUriTemplate("{*}")); // explode with no varname
+}

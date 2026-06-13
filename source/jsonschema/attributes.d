@@ -82,3 +82,13 @@ SchemaDefault!T schemaDefault(T)(T value) pure nothrow
 {
     return SchemaDefault!T(value);
 }
+
+unittest  // schemaDefault infers the value type
+{
+    auto d = schemaDefault(10);
+    static assert(is(typeof(d) == SchemaDefault!int));
+    assert(d.value == 10);
+
+    auto sd = schemaDefault("hi");
+    assert(sd.value == "hi");
+}

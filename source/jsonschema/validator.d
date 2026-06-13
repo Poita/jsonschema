@@ -112,12 +112,6 @@ package struct Evaluated
             extraItems[i] = true;
     }
 
-    void markItemsThrough(size_t n) pure nothrow
-    {
-        if (n > itemsPrefix)
-            itemsPrefix = n;
-    }
-
     bool hasItem(size_t i) const pure nothrow
     {
         return i < itemsPrefix || (i in extraItems) !is null;
@@ -924,4 +918,93 @@ package bool deepEqualValues(A)(in A.Value a, in A.Value b)
     case JsonKind.floating:
         assert(false); // handled by the numeric branch above
     }
+}
+
+// --- tests ---
+
+unittest  // cmpNumbers: unsigned/unsigned and unsigned/signed ordering
+{
+    alias N = JsonNumber;
+    const big = N.ofULong(ulong.max);
+    const bigger = big; // ulong.max compared to itself
+    assert(cmpNumbers(big, bigger) == 0);
+    assert(cmpNumbers(N.ofULong(18446744073709551614UL), big) < 0);
+    assert(cmpNumbers(big, N.ofULong(18446744073709551614UL)) > 0);
+    // An unsigned beyond long.max is always greater than any signed value.
+    assert(cmpNumbers(big, N.ofLong(5)) > 0);
+    assert(cmpNumbers(N.ofLong(5), big) < 0);
+}
+
+unittest  // cmpNumbers: float/float ordering
+{
+    alias N = JsonNumber;
+    assert(cmpNumbers(N.ofDouble(1.5), N.ofDouble(2.5)) < 0);
+    assert(cmpNumbers(N.ofDouble(2.5), N.ofDouble(1.5)) > 0);
+    assert(cmpNumbers(N.ofDouble(2.5), N.ofDouble(2.5)) == 0);
+}
+
+unittest  // cmpNumbers: a NaN orders below everything
+{
+    alias N = JsonNumber;
+    const q = N.ofDouble(double.nan);
+    // cmpIntFloat returns 1 for NaN (ordered below the integer side).
+    assert(cmpNumbers(N.ofLong(0), q) != 0);
+    assert(cmpNumbers(q, N.ofLong(0)) != 0);
+}
+
+unittest  // cmpNumbers: signed integer against out-of-range and fractional floats
+{
+    alias N = JsonNumber;
+    // Float far above long range: the integer is smaller.
+    assert(cmpNumbers(N.ofLong(1), N.ofDouble(1e19)) < 0);
+    // Float far below long range: the integer is larger.
+    assert(cmpNumbers(N.ofLong(1), N.ofDouble(-1e19)) > 0);
+    // Equal integral value: equal.
+    assert(cmpNumbers(N.ofLong(3), N.ofDouble(3.0)) == 0);
+    // Same whole part but a positive fraction makes the float larger.
+    assert(cmpNumbers(N.ofLong(3), N.ofDouble(3.5)) < 0);
+    assert(cmpNumbers(N.ofLong(4), N.ofDouble(3.5)) > 0);
+}
+
+unittest  // cmpNumbers: unsigned integer against floats across its range
+{
+    alias N = JsonNumber;
+    const u = N.ofULong(ulong.max); // > long.max, so unsigned representation
+    // Float beyond 2^64: the unsigned is smaller.
+    assert(cmpNumbers(u, N.ofDouble(1e20)) < 0);
+    // Float below 2^63: the unsigned is larger.
+    assert(cmpNumbers(u, N.ofDouble(1.0)) > 0);
+    // A representable unsigned compared with its exact double.
+    const w = N.ofULong(9223372036854775808UL); // 2^63
+    assert(cmpNumbers(w, N.ofDouble(9223372036854775808.0)) == 0);
+    // A larger unsigned whose floor matches the float but differs in value.
+    assert(cmpNumbers(N.ofULong(9223372036854775809UL), N.ofDouble(9223372036854775808.0)) > 0);
+}
+
+unittest  // isMultipleOf: zero divisors never divide
+{
+    alias N = JsonNumber;
+    assert(!isMultipleOf(N.ofLong(4), N.ofLong(0)));
+    assert(!isMultipleOf(N.ofDouble(4.0), N.ofDouble(0.0)));
+}
+
+unittest  // isMultipleOf: integer and float divisors
+{
+    alias N = JsonNumber;
+    assert(isMultipleOf(N.ofLong(6), N.ofLong(3)));
+    assert(!isMultipleOf(N.ofLong(7), N.ofLong(3)));
+    // A negative divisor: magnitude is what matters.
+    assert(isMultipleOf(N.ofLong(6), N.ofLong(-3)));
+    assert(isMultipleOf(N.ofDouble(0.0075), N.ofDouble(0.0001)));
+    assert(!isMultipleOf(N.ofDouble(0.00751), N.ofDouble(0.0001)));
+}
+
+unittest  // isMultipleOf: a huge dividend over a tiny divisor uses the fmod fallback
+{
+    alias N = JsonNumber;
+    // 2^1000 / 2^-1000 overflows to infinity, forcing the fmod path; both are
+    // exact powers of two, so 2^1000 is an exact multiple of 2^-1000.
+    const huge = 2.0 ^^ 1000;
+    const tiny = 2.0 ^^ -1000;
+    assert(isMultipleOf(N.ofDouble(huge), N.ofDouble(tiny)));
 }
