@@ -73,6 +73,11 @@ struct GeneratorSettings
 
 /// Generate the JSON Schema for `T` with runtime-known settings.
 ///
+/// Returns a `JsonNode` (the vibe-free base representation). Rendering to a
+/// `std.json.JSONValue` is a separate, explicit step via `toStdJson`; in the
+/// `jsonschema:vibe` subpackage use `nodeToVibeJson` for `vibe.data.json.Json`.
+/// `JsonNode.toString` yields compact JSON text directly.
+///
 /// With `settings.inlineSubschemas` set, struct types are expanded inline at
 /// every use site and the document contains no `$defs`/`$ref` — for consumers
 /// that don't follow `$ref` inside an embedded schema. A directly or mutually
