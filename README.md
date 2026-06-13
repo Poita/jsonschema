@@ -145,6 +145,28 @@ referenced via `$ref`; everything else is inlined. Unsupported types
 (pointers, classes, delegates, non-string AA keys) fail with a clear
 `static assert`.
 
+### Inline subschemas (no `$ref`)
+
+By default a schema uses `$defs`/`$ref` for shared and recursive struct types.
+Some consumers don't follow `$ref` inside an embedded schema (e.g. a few MCP
+clients are weak on `$ref` within a tool `inputSchema`). For them, set
+`inlineSubschemas` to expand every subschema in place, producing a fully
+self-contained document with no `$defs` and no `$ref` — a type used N times is
+expanded N times:
+
+```d
+GeneratorSettings settings;
+settings.inlineSubschemas = true;
+auto schema = jsonSchemaOf!Point(settings);   // no $defs/$ref anywhere
+```
+
+A directly or mutually recursive type cannot be inlined (the expansion would
+never terminate). Such a type is rejected naming the offending type — at
+compile time via the compile-time-settings form
+`jsonSchemaOf!(T, settings)`, or by throwing at runtime via
+`jsonSchemaOf!T(settings)`. Recursive types are fine in the default
+(`$defs`/`$ref`) mode.
+
 Constraint UDAs (`jsonschema.attributes`):
 
 - `@minimum`, `@maximum` — numeric bounds

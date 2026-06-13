@@ -29,6 +29,7 @@ module jsonschema.generate;
 import jsonschema.node : JsonNode;
 
 import std.conv : to;
+import std.meta : staticIndexOf;
 import std.sumtype : isSumType;
 import std.traits;
 import std.typecons : Nullable;
@@ -63,14 +64,44 @@ struct GeneratorSettings
     /// root. Off by default: generated schemas are usually embedded (e.g. as a
     /// tool inputSchema) where the dialect is implied.
     bool emitSchemaKeyword = false;
+
+    /// Inline every subschema instead of emitting shared/repeated struct types
+    /// into `$defs` and referencing them with `$ref`. Default false (refs).
+    /// Modeled on Rust schemars' `inline_subschemas`.
+    bool inlineSubschemas = false;
 }
 
 /// Generate the JSON Schema for `T`.
+///
+/// With `settings.inlineSubschemas` set, struct types are expanded inline at
+/// every use site and the document contains no `$defs`/`$ref` — for consumers
+/// that don't follow `$ref` inside an embedded schema. A directly or mutually
+/// recursive type cannot be inlined; requesting it throws. To have that
+/// rejection happen at compile time instead, use the compile-time-settings
+/// overload `jsonSchemaOf!(T, settings)`.
 JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
 {
+    enum recName = inlineRecursionName!T;
+
     GenContext ctx;
-    countType!T(ctx, null);
-    auto root = emitType!T(ctx);
+    JsonNode root;
+    if (settings.inlineSubschemas)
+    {
+        // The inline walk is only instantiated for types that can actually be
+        // inlined; a recursive type takes the runtime branch below instead, so
+        // it never reaches `emitTypeInline` and `jsonSchemaOf!T` still compiles
+        // in the default mode.
+        static if (recName.length == 0)
+            root = emitTypeInline!T();
+        else
+            assert(false, "jsonSchemaOf: cannot inline recursive type " ~ recName
+                    ~ " with inlineSubschemas=true; use $defs mode (the default)");
+    }
+    else
+    {
+        countType!T(ctx, null);
+        root = emitType!T(ctx);
+    }
 
     if (settings.emitSchemaKeyword)
     {
@@ -83,6 +114,20 @@ JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
     if (ctx.defs.members_.length)
         root.set("$defs", ctx.defs);
     return root;
+}
+
+/// Generate the JSON Schema for `T` with compile-time-known settings.
+///
+/// Identical to the runtime overload, except that requesting
+/// `inlineSubschemas` for a recursive type is rejected with a `static assert`
+/// naming the offending type, rather than throwing at runtime.
+JsonNode jsonSchemaOf(T, GeneratorSettings settings)()
+{
+    static if (settings.inlineSubschemas)
+        static assert(inlineRecursionName!T.length == 0,
+                "jsonSchemaOf: cannot inline recursive type " ~ inlineRecursionName!T
+                ~ " with inlineSubschemas=true; use $defs mode (the default)");
+    return jsonSchemaOf!T(settings);
 }
 
 private struct GenContext
@@ -273,6 +318,156 @@ private JsonNode emitStructBody(T)(ref GenContext ctx)
     return s;
 }
 
+// --- inline mode ($defs/$ref-free) ---
+
+/// Compile-time recursion probe for inline emission. Returns the `.stringof` of
+/// the first struct type that reappears in its own ancestry when fully inlined,
+/// or `""` if `T` can be inlined without recursion. `Ancestors` is the chain of
+/// struct types currently being expanded.
+private template inlineRecursionName(T, Ancestors...)
+{
+    static if (isInstanceOf!(Nullable, T))
+        enum inlineRecursionName = inlineRecursionName!(TemplateArgsOf!T[0], Ancestors);
+    else static if (is(T == enum) || is(T == bool) || isStdDateTime!T
+            || isIntegral!T || isFloatingPoint!T || isSomeString!T)
+        enum inlineRecursionName = "";
+    else static if (isSumType!T)
+    {
+        enum inlineRecursionName = () {
+            static foreach (V; TemplateArgsOf!T)
+            {
+                {
+                    enum r = inlineRecursionName!(V, Ancestors);
+                    if (r.length)
+                        return r;
+                }
+            }
+            return "";
+        }();
+    }
+    else static if (isAssociativeArray!T)
+        enum inlineRecursionName = inlineRecursionName!(ValueType!T, Ancestors);
+    else static if (isArray!T)
+        enum inlineRecursionName = inlineRecursionName!(typeof(T.init[0]), Ancestors);
+    else static if (is(T == struct))
+    {
+        static if (staticIndexOf!(T, Ancestors) >= 0)
+            enum inlineRecursionName = T.stringof;
+        else
+        {
+            enum inlineRecursionName = () {
+                static foreach (field; FieldNameTuple!T)
+                {
+                    {
+                        enum r = inlineRecursionName!(typeof(__traits(getMember, T,
+                                field)), Ancestors, T);
+                        if (r.length)
+                            return r;
+                    }
+                }
+                return "";
+            }();
+        }
+    }
+    else
+        enum inlineRecursionName = "";
+}
+
+/// Emit `T` with every subschema inlined: no `$defs`, no `$ref`. A struct type
+/// found in its own `Ancestors` is recursive and rejected at compile time.
+private JsonNode emitTypeInline(T, Ancestors...)()
+{
+    static if (isInstanceOf!(Nullable, T))
+    {
+        auto nullSchema = JsonNode.emptyObject();
+        nullSchema.set("type", JsonNode("null"));
+        auto variants = JsonNode.emptyArray();
+        variants.append(emitTypeInline!(TemplateArgsOf!T[0], Ancestors)());
+        variants.append(nullSchema);
+        auto s = JsonNode.emptyObject();
+        s.set("anyOf", variants);
+        return s;
+    }
+    else static if (is(T == bool))
+        return typeSchema("boolean");
+    else static if (is(T == enum))
+    {
+        auto s = typeSchema("string");
+        auto e = JsonNode.emptyArray();
+        static foreach (m; EnumMembers!T)
+            e.append(JsonNode(to!string(m)));
+        s.set("enum", e);
+        return s;
+    }
+    else static if (isStdDateTime!T)
+    {
+        auto s = typeSchema("string");
+        s.set("format", JsonNode(stdDateTimeFormat!T));
+        return s;
+    }
+    else static if (isIntegral!T)
+    {
+        auto s = typeSchema("integer");
+        static if (isUnsigned!T)
+            s.set("minimum", JsonNode(0L));
+        return s;
+    }
+    else static if (isFloatingPoint!T)
+        return typeSchema("number");
+    else static if (isSomeString!T)
+        return typeSchema("string");
+    else static if (isSumType!T)
+    {
+        auto variants = JsonNode.emptyArray();
+        static foreach (V; TemplateArgsOf!T)
+            variants.append(emitTypeInline!(V, Ancestors)());
+        auto s = JsonNode.emptyObject();
+        s.set("anyOf", variants);
+        return s;
+    }
+    else static if (isAssociativeArray!T)
+    {
+        static assert(isSomeString!(KeyType!T),
+                "jsonSchemaOf: unsupported associative-array key type "
+                ~ KeyType!T.stringof ~ " in " ~ T.stringof ~ " (JSON object keys must be strings)");
+        auto s = typeSchema("object");
+        s.set("additionalProperties", emitTypeInline!(ValueType!T, Ancestors)());
+        return s;
+    }
+    else static if (isArray!T)
+    {
+        auto s = typeSchema("array");
+        s.set("items", emitTypeInline!(typeof(T.init[0]), Ancestors)());
+        return s;
+    }
+    else static if (is(T == struct))
+    {
+        static assert(staticIndexOf!(T, Ancestors) < 0,
+                "jsonSchemaOf: cannot inline recursive type " ~ T.stringof
+                ~ " with inlineSubschemas=true; use $defs mode (the default)");
+        auto s = typeSchema("object");
+        auto props = JsonNode.emptyObject();
+        auto required = JsonNode.emptyArray();
+        static foreach (i, field; FieldNameTuple!T)
+        {
+            {
+                alias FT = typeof(__traits(getMember, T, field));
+                auto prop = emitTypeInline!(FT, Ancestors, T)();
+                applyFieldFacets!(T, field)(prop);
+                props.set(field, prop);
+                static if (!isInstanceOf!(Nullable, FT) && !hasFieldDefault!(T, i))
+                    required.append(JsonNode(field));
+            }
+        }
+        s.set("properties", props);
+        if (required.array_.length)
+            s.set("required", required);
+        return s;
+    }
+    else
+        static assert(false, "jsonSchemaOf: unsupported type " ~ T.stringof);
+}
+
 /// Emit facet UDAs from a compile-time sequence (e.g. `__traits(getAttributes, …)`)
 /// onto a property schema. Unrecognized UDA types are ignored.
 package void applyUdaFacets(udas...)(ref JsonNode prop)
@@ -375,7 +570,7 @@ version (unittest)
 {
     import jsonschema.compiler : compileSchema;
     import jsonschema.ir : OutputFormat;
-    import jsonschema.node : parseJson;
+    import jsonschema.node : jsonEquals, parseJson;
     import std.meta : AliasSeq;
 }
 
@@ -640,6 +835,108 @@ unittest  // recursive generated schemas validate recursive instances
     assert(!v.validate(parseJson(`{"value": 1, "children": [{"children": []}]}`)).valid);
 }
 
+unittest  // inlineSubschemas expands a shared struct at every use site
+{
+    static struct Leaf
+    {
+        int v;
+    }
+
+    static struct Pair
+    {
+        Leaf left;
+        Leaf right;
+    }
+
+    // Default mode: one $defs entry plus two $refs.
+    auto def = jsonSchemaOf!Pair;
+    assert(def.get("$defs").get("Leaf").get("type").string_ == "object");
+    assert(def.get("properties").get("left").get("$ref").string_ == "#/$defs/Leaf");
+    assert(def.get("properties").get("right").get("$ref").string_ == "#/$defs/Leaf");
+
+    // Inline mode: the full object schema appears in both places, and there is
+    // no $defs or $ref anywhere in the document.
+    auto inl = jsonSchemaOf!Pair(GeneratorSettings(false, true));
+    assert(inl.get("$defs") is null);
+    auto left = inl.get("properties").get("left");
+    auto right = inl.get("properties").get("right");
+    assert(left.get("type").string_ == "object");
+    assert(left.get("properties").get("v").get("type").string_ == "integer");
+    assert(right.get("type").string_ == "object");
+    assert(right.get("properties").get("v").get("type").string_ == "integer");
+    assert(left.get("$ref") is null && right.get("$ref") is null);
+
+    import std.string : indexOf;
+
+    assert(inl.toString.indexOf("$ref") == -1);
+    assert(inl.toString.indexOf("$defs") == -1);
+
+    // The compile-time-settings overload accepts inline for a non-recursive type.
+    static assert(__traits(compiles, jsonSchemaOf!(Pair, GeneratorSettings(false, true))()));
+}
+
+unittest  // recursive structs compile in default mode but not under inline
+{
+    static struct Node
+    {
+        int value;
+        Node[] children;
+    }
+
+    // Default ($defs/$ref) mode compiles and uses a $ref to itself.
+    static assert(__traits(compiles, jsonSchemaOf!Node));
+    auto s = jsonSchemaOf!Node;
+    assert(s.get("$ref").string_ == "#/$defs/Node");
+
+    // Inlining a recursive type cannot terminate: rejected at compile time.
+    static assert(!__traits(compiles, jsonSchemaOf!(Node, GeneratorSettings(false, true))()));
+}
+
+unittest  // inline-mode output validates against the 2020-12 meta-schema
+{
+    static struct Leaf
+    {
+        int v;
+    }
+
+    static struct Pair
+    {
+        Leaf a;
+        Leaf b;
+    }
+
+    auto meta = compileSchema(`{"$ref": "https://json-schema.org/draft/2020-12/schema"}`);
+
+    auto inl = jsonSchemaOf!Pair(GeneratorSettings(false, true));
+    assert(meta.validate(inl).valid, inl.toString);
+
+    auto withDialect = jsonSchemaOf!Pair(GeneratorSettings(true, true));
+    assert(meta.validate(withDialect).valid);
+}
+
+unittest  // inline and default agree for a non-shared, non-recursive type
+{
+    static struct Inner
+    {
+        int v;
+        string s;
+    }
+
+    static struct Outer
+    {
+        Inner one;
+        int n;
+    }
+
+    // A single-use struct is inlined in both modes, so the only difference would
+    // be the $defs wrapper — and there is none here. The schemas are identical.
+    auto def = jsonSchemaOf!Outer;
+    auto inl = jsonSchemaOf!Outer(GeneratorSettings(false, true));
+    assert(def.get("$defs") is null);
+    assert(inl.get("$defs") is null);
+    assert(jsonEquals(def, inl));
+}
+
 unittest  // every generated schema conforms to the 2020-12 meta-schema
 {
     import std.sumtype : SumType;
@@ -673,11 +970,18 @@ unittest  // every generated schema conforms to the 2020-12 meta-schema
     {
         {
             auto generated = jsonSchemaOf!T;
-            auto r = meta.validate(generated);
+            const r = meta.validate(generated);
             assert(r.valid, T.stringof ~ " schema fails meta-validation: " ~ generated.toString);
             // And with the explicit $schema keyword at the root.
             auto withDialect = jsonSchemaOf!T(GeneratorSettings(true));
             assert(meta.validate(withDialect).valid);
+            // Inline mode (where the type is not recursive) must also conform.
+            static if (inlineRecursionName!T.length == 0)
+            {
+                auto inlined = jsonSchemaOf!T(GeneratorSettings(false, true));
+                assert(meta.validate(inlined).valid,
+                        T.stringof ~ " inline schema fails meta-validation: " ~ inlined.toString);
+            }
         }
     }
 }
