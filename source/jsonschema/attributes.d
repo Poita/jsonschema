@@ -18,16 +18,42 @@ struct title
     string value;
 }
 
-/// Emits the JSON Schema `minimum` keyword (inclusive numeric lower bound).
-struct minimum
+/// The payload struct carrying a `@minimum` value. Construct it via the
+/// `minimum(value)` factory so the value type is inferred; the generator
+/// detects it with `isInstanceOf!(Minimum, UDA)`.
+///
+/// Templating on the value type lets integral bounds beyond 2^53 round-trip
+/// exactly (e.g. `@minimum(9007199254740993L)`), since a `double` payload
+/// could not represent them.
+struct Minimum(T)
 {
-    double value;
+    T value;
 }
 
-/// Emits the JSON Schema `maximum` keyword (inclusive numeric upper bound).
-struct maximum
+/// Factory producing the `@minimum` UDA (inclusive numeric lower bound):
+/// `@minimum(1) int count;` or `@minimum(9007199254740993L) long big;`.
+Minimum!T minimum(T)(T value) pure nothrow
 {
-    double value;
+    return Minimum!T(value);
+}
+
+/// The payload struct carrying a `@maximum` value. Construct it via the
+/// `maximum(value)` factory so the value type is inferred; the generator
+/// detects it with `isInstanceOf!(Maximum, UDA)`.
+///
+/// Templating on the value type lets integral bounds beyond 2^53 round-trip
+/// exactly (e.g. `@maximum(9007199254740993L)`), since a `double` payload
+/// could not represent them.
+struct Maximum(T)
+{
+    T value;
+}
+
+/// Factory producing the `@maximum` UDA (inclusive numeric upper bound):
+/// `@maximum(100) int count;` or `@maximum(9007199254740993L) long big;`.
+Maximum!T maximum(T)(T value) pure nothrow
+{
+    return Maximum!T(value);
 }
 
 /// Emits the JSON Schema `format` keyword (e.g. "email", "uri", "date-time").
