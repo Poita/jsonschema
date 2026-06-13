@@ -25,7 +25,9 @@ Validator compileSchema(JsonNode doc, ValidatorSettings settings = ValidatorSett
     auto sess = new Session(store, settings);
     auto root = compileDocument(sess, doc, settings.baseUri);
     resolvePendingRefs(sess);
-    return new Validator(root.root, settings);
+    auto validator = new Validator(root.root, settings);
+    validator.usesUnevaluated = sess.usesUnevaluated;
+    return validator;
 }
 
 /// Compile a schema from JSON text.
@@ -58,6 +60,10 @@ package final class Session
     SchemaRef[] pending;
     /// Documents currently being walked (cycle guard).
     bool[string] docsInProgress;
+    /// Set when any compiled schema in this validator declares
+    /// `unevaluatedProperties` or `unevaluatedItems`. When false, the evaluator
+    /// can skip all `Evaluated` annotation bookkeeping.
+    bool usesUnevaluated;
 
     this(SchemaStore store, ValidatorSettings settings) pure nothrow
     {
@@ -597,9 +603,11 @@ private bool compileUnevaluatedKeyword(Session sess, CompiledSchema s, string ke
     switch (key)
     {
     case "unevaluatedItems":
+        sess.usesUnevaluated = true;
         s.unevaluatedItems = walk(sess, val, frames.extend("/unevaluatedItems"), null);
         return true;
     case "unevaluatedProperties":
+        sess.usesUnevaluated = true;
         s.unevaluatedProperties = walk(sess, val, frames.extend("/unevaluatedProperties"), null);
         return true;
     default:

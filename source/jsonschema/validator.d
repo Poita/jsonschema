@@ -29,6 +29,10 @@ final class Validator
 {
     package CompiledSchema root;
     package ValidatorSettings settings;
+    /// True when the compiled schema tree uses `unevaluatedProperties` or
+    /// `unevaluatedItems` anywhere. When false, the evaluator skips all
+    /// `Evaluated` annotation bookkeeping since nothing consults it.
+    package bool usesUnevaluated;
 
     package this(CompiledSchema root, ValidatorSettings settings) pure nothrow
     {
@@ -84,6 +88,7 @@ final class Validator
         st.collect = format != OutputFormat.flag;
         st.maxDepth = settings.maxDepth;
         st.assertFormats = settings.formatMode == FormatMode.assertion;
+        st.tracksAnnotations = usesUnevaluated;
         Evaluated ev;
         const ok = evalSchema!A(root, instance, "", "", st, ev);
         return ValidationResult(ok, st.errors);
@@ -119,6 +124,7 @@ private struct EvalState(A)
     bool collect;
     bool assertFormats;
     bool depthExceeded;
+    bool tracksAnnotations;
     size_t depth;
     size_t maxDepth;
 }
@@ -129,6 +135,10 @@ private struct EvalState(A)
 /// the collectors of all successful in-place applicator branches.
 package struct Evaluated
 {
+    /// When false, the schema tree has no `unevaluated*` keyword to consult
+    /// these annotations, so all mutators below are no-ops and the AAs stay
+    /// untouched. `evalSchema` sets this from `EvalState.tracksAnnotations`.
+    bool track;
     bool allProps;
     bool[string] props;
     size_t itemsPrefix; // indices below this are evaluated
@@ -136,6 +146,8 @@ package struct Evaluated
 
     void markProp(string key) pure nothrow
     {
+        if (!track)
+            return;
         if (!allProps)
             props[key] = true;
     }
@@ -147,6 +159,8 @@ package struct Evaluated
 
     void markItem(size_t i) pure nothrow
     {
+        if (!track)
+            return;
         if (i == itemsPrefix)
             itemsPrefix++;
         else if (i > itemsPrefix)
@@ -160,6 +174,8 @@ package struct Evaluated
 
     void merge(ref const Evaluated o) pure
     {
+        if (!track)
+            return;
         allProps |= o.allProps;
         if (allProps)
             props = null;
@@ -193,6 +209,7 @@ private string loc(A)(ref EvalState!A st, string base, lazy string suffix)
 package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         string kp, ref EvalState!A st, ref Evaluated ev)
 {
+    ev.track = st.tracksAnnotations;
     if (++st.depth > st.maxDepth)
     {
         // Treat exceeding the depth limit (an unboundedly recursive schema) as
