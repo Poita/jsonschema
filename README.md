@@ -131,11 +131,17 @@ struct Point
     Nullable!string label;       // optional, accepts null
 }
 
+// jsonSchemaOf returns a JsonNode (the vibe-free base representation).
 JsonNode schema = jsonSchemaOf!Point;
-writeln(schema);            // compact JSON text
-auto std = toStdJson(schema);             // std.json.JSONValue
-// import jsonschema.vibejson : nodeToVibeJson;  (jsonschema:vibe)
-// auto vib = nodeToVibeJson(schema);             // vibe.data.json.Json
+writeln(schema);            // compact JSON text via JsonNode.toString
+
+// Producing a std.json or vibe value is a separate, explicit conversion step:
+import std.json : JSONValue;
+JSONValue std = toStdJson(schema);          // std.json.JSONValue
+
+// In the jsonschema:vibe subpackage instead:
+// import jsonschema.vibejson : nodeToVibeJson;
+// auto vib = nodeToVibeJson(schema);       // vibe.data.json.Json
 
 // Generated schemas can be compiled and used to validate immediately:
 auto v = compileSchema(jsonSchemaOf!Point);
