@@ -1,5 +1,9 @@
 # jsonschema
 
+[![CI](https://github.com/Poita/jsonschema/actions/workflows/ci.yml/badge.svg)](https://github.com/Poita/jsonschema/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Poita/jsonschema/branch/master/graph/badge.svg)](https://codecov.io/gh/Poita/jsonschema)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 A complete **JSON Schema 2020-12** implementation for D, in two halves:
 
 1. **Validator** — compile arbitrary JSON Schema 2020-12 documents into a

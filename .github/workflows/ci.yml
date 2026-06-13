@@ -33,3 +33,38 @@ jobs:
 
       - name: Official JSON-Schema-Test-Suite (both adapters, pass rate in log)
         run: dub run :suite-runner
+
+  coverage:
+    name: coverage to Codecov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc-latest
+
+      # `dub test --coverage` builds the unittest binary with coverage
+      # instrumentation and runs it, emitting one dmd-style `.lst` per module in
+      # the repo root. The vibe run goes first so the base run keeps full base
+      # coverage while the vibe adapter's `.lst` survives.
+      - name: Test with coverage
+        run: |
+          dub test :vibe --coverage
+          dub test --coverage
+
+      # Convert the `.lst` files to a single lcov report; Codecov ingests lcov
+      # reliably, unlike D's `.lst` format and dub's dash-mangled filenames.
+      - name: Convert coverage to lcov
+        run: bash scripts/cov-to-lcov.sh lcov.info
+
+      # Public repo: uploads tokenlessly. fail_ci_if_error stays false so a
+      # transient Codecov outage never blocks CI.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

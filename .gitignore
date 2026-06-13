@@ -2,6 +2,7 @@
 *.o
 *.obj
 *.lst
+lcov.info
 __test__*__
 __dummy.html
 docs.json
