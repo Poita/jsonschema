@@ -98,10 +98,9 @@ auto v = compileSchema(schemaText, settings);
   The library performs no network I/O; supply `settings.resolver` if you want
   to load schemas yourself.
 - Dialects: `$schema` is honored; absent means 2020-12. Any other dialect
-  throws `UnsupportedDialectException` (catch it to satisfy the MCP "reject
-  unknown dialects" requirement). Custom meta-schemas with `$vocabulary` are
-  supported, including vocabulary-gated keyword sets and the format-assertion
-  vocabulary.
+  throws `UnsupportedDialectException`. Custom meta-schemas with `$vocabulary`
+  are supported, including vocabulary-gated keyword sets and the
+  format-assertion vocabulary.
 - Output formats: `OutputFormat.flag` (validity only) and `OutputFormat.basic`
   (flat error list with `instanceLocation` / `keywordLocation`).
 
@@ -128,20 +127,36 @@ auto std = toStdJson(schema);             // std.json.JSONValue
 auto v = compileSchema(jsonSchemaOf!Point);
 ```
 
-Type mapping: `bool`/integral/floating/`string` → the matching primitive
-(`uint` etc. also emit `minimum: 0`), `enum` → string + `enum`, arrays →
-`items`, string-keyed AAs → `additionalProperties`, `Nullable!T` →
-`anyOf: [T, null]`, `SumType!(…)` → `anyOf`, `std.datetime` types →
-formatted strings, structs → objects with `properties`/`required`. Struct
-types used more than once or recursively are emitted into `$defs` and
+Type mapping:
+
+| D type | Schema |
+|---|---|
+| `bool`, integral, floating, `string` | matching primitive (`uint` etc. also emit `minimum: 0`) |
+| `enum` | string with `enum` |
+| arrays | `items` |
+| string-keyed associative arrays | `additionalProperties` |
+| `Nullable!T` | `anyOf: [T, null]` |
+| `SumType!(…)` | `anyOf` |
+| `std.datetime` types | formatted strings |
+| structs | objects with `properties`/`required` |
+
+Struct types used more than once or recursively are emitted into `$defs` and
 referenced via `$ref`; everything else is inlined. Unsupported types
 (pointers, classes, delegates, non-string AA keys) fail with a clear
 `static assert`.
 
-Constraint UDAs (`jsonschema.attributes`): `@minimum`, `@maximum`,
-`@pattern`, `@minLength`, `@maxLength`, `@minItems`, `@maxItems`, `@format`,
-`@title`, `@fieldDescription`, `@schemaDefault`. A field with `@schemaDefault`
-or a declared initializer is omitted from `required`.
+Constraint UDAs (`jsonschema.attributes`):
+
+- `@minimum`, `@maximum` — numeric bounds
+- `@minLength`, `@maxLength` — string length bounds
+- `@pattern` — string regex
+- `@minItems`, `@maxItems` — array length bounds
+- `@format` — string format annotation
+- `@title`, `@fieldDescription` — documentation
+- `@schemaDefault` — default value (also omits the field from `required`)
+
+A field with `@schemaDefault` or a declared initializer is omitted from
+`required`.
 
 Every generated schema is verified against the official 2020-12 meta-schema
 (using this library's own validator) in the test suite.
