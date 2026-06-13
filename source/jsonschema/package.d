@@ -394,6 +394,36 @@ unittest  // flag output collects no errors
     assert(r.errors.length == 0);
 }
 
+unittest  // flag mode early-exits but agrees with basic on validity
+{
+    // Each pair exercises a different short-circuit point: type, numeric
+    // bounds, string length, allOf branch, required, prefix item, and a
+    // schema where multiple keywords fail.
+    static immutable cases = [
+        [`{"type": "string", "minLength": 2}`, `1`],
+        [`{"type": "integer", "minimum": 10, "multipleOf": 3}`, `4`],
+        [`{"type": "string", "maxLength": 1, "pattern": "x"}`, `"abc"`],
+        [`{"allOf": [{"type": "integer"}, {"minimum": 5}]}`, `2`],
+        [
+            `{"required": ["a", "b"], "properties": {"a": {"type": "string"}}}`,
+            `{"a": 1}`
+        ],
+        [
+            `{"prefixItems": [{"type": "integer"}, {"type": "string"}]}`,
+            `["x", 2]`
+        ], [`{"type": "object", "minProperties": 3}`, `{"a": 1}`],
+    ];
+    foreach (c; cases)
+    {
+        auto v = compileSchema(c[0]);
+        const inst = parseJSON(c[1]);
+        const basic = v.validate(inst, OutputFormat.basic).valid;
+        const flag = v.validate(inst, OutputFormat.flag).valid;
+        assert(basic == flag);
+        assert(!flag); // all sample instances are invalid
+    }
+}
+
 unittest  // validating the 2020-12 meta-schema itself ($dynamicRef machinery)
 {
     auto v = compileSchema(`{"$ref": "https://json-schema.org/draft/2020-12/schema"}`);
