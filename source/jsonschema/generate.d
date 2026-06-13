@@ -497,10 +497,10 @@ public void applyUdaFacets(udas...)(ref JsonNode prop)
 
     static foreach (uda; udas)
     {
-        static if (is(typeof(uda) == minimum))
-            prop.set("minimum", numberNode(uda.value));
-        else static if (is(typeof(uda) == maximum))
-            prop.set("maximum", numberNode(uda.value));
+        static if (isInstanceOf!(Minimum, typeof(uda)))
+            prop.set("minimum", boundNode(uda.value));
+        else static if (isInstanceOf!(Maximum, typeof(uda)))
+            prop.set("maximum", boundNode(uda.value));
         else static if (is(typeof(uda) == title))
             prop.set("title", JsonNode(uda.value));
         else static if (is(typeof(uda) == format))
@@ -529,6 +529,17 @@ private JsonNode numberNode(double v) pure nothrow
     if (isFinite(v) && v == floor(v) && v >= -9.0e15 && v <= 9.0e15)
         return JsonNode(cast(long) v);
     return JsonNode(v);
+}
+
+/// Serialize a `@minimum`/`@maximum` bound. Integral bounds round-trip
+/// exactly (even beyond 2^53) by going straight to an integer `JsonNode`;
+/// fractional bounds fall back to `numberNode`.
+private JsonNode boundNode(V)(V v) pure nothrow
+{
+    static if (isIntegral!V)
+        return JsonNode(v);
+    else
+        return numberNode(v);
 }
 
 private void applyFieldFacets(T, string field)(ref JsonNode prop)
@@ -829,6 +840,55 @@ unittest  // facet UDAs are emitted onto property schemas
     assert(s.get("properties").get("limit").get("default").integer_ == 10);
     // limit carries @schemaDefault, so only count/addr/picks are required.
     assert(s.get("required").array_.length == 3);
+}
+
+unittest  // integral bounds above 2^53 round-trip exactly (no double rounding)
+{
+    import jsonschema.attributes;
+    import std.algorithm.searching : canFind;
+
+    static struct Big
+    {
+        @minimum(9007199254740993L) @maximum(9223372036854775807L) long n;
+    }
+
+    auto s = jsonSchemaOf!Big;
+    auto n = s.get("properties").get("n");
+    assert(n.get("minimum").integer_ == 9007199254740993L);
+    assert(n.get("maximum").integer_ == 9223372036854775807L);
+    assert(n.toString.canFind("9007199254740993"));
+    assert(n.toString.canFind("9223372036854775807"));
+}
+
+unittest  // unsigned bounds beyond long.max round-trip exactly
+{
+    import jsonschema.attributes;
+    import std.algorithm.searching : canFind;
+
+    static struct BigU
+    {
+        @maximum(18446744073709551615UL) ulong n;
+    }
+
+    auto s = jsonSchemaOf!BigU;
+    auto n = s.get("properties").get("n");
+    assert(n.get("maximum").uinteger_ == 18446744073709551615UL);
+    assert(n.toString.canFind("18446744073709551615"));
+}
+
+unittest  // fractional bounds still emit as floating-point numbers
+{
+    import jsonschema.attributes;
+
+    static struct Frac
+    {
+        @minimum(0.5) @maximum(99.5) double x;
+    }
+
+    auto s = jsonSchemaOf!Frac;
+    auto x = s.get("properties").get("x");
+    assert(x.get("minimum").floating_ == 0.5);
+    assert(x.get("maximum").floating_ == 99.5);
 }
 
 unittest  // fields with declared defaults are optional
