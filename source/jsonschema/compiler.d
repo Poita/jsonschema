@@ -1010,3 +1010,432 @@ private SchemaResource findResource(Session sess, string base)
     throw new SchemaCompileException("unresolvable reference to '" ~ base
             ~ "' (schema not registered; " ~ "register it in the SchemaStore or supply a resolver)");
 }
+
+// --- tests ---
+
+version (unittest)
+{
+    import std.exception : assertThrown;
+
+    private bool ok(Validator v, string instance)
+    {
+        return v.validate(parseJson(instance)).valid;
+    }
+}
+
+unittest  // compileSchema accepts a std.json value directly
+{
+    import std.json : parseJSON;
+
+    auto v = compileSchema(parseJSON(`{"type": "integer"}`));
+    assert(ok(v, "3"));
+    assert(!ok(v, `"x"`));
+}
+
+unittest  // a custom 2020-12 meta-schema's $vocabulary is honored
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-all", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-all",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2020-12/vocab/core": true,
+            "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+            "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
+            "https://json-schema.org/draft/2020-12/vocab/validation": true,
+            "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
+            "https://json-schema.org/draft/2020-12/vocab/format-assertion": true,
+            "https://json-schema.org/draft/2020-12/vocab/content": true
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    auto v = compileSchema(`{
+        "$schema": "https://example.com/meta-all",
+        "type": "integer",
+        "format": "ipv4"
+    }`, settings);
+    assert(ok(v, "3"));
+    assert(!ok(v, `"x"`));
+    // format-assertion vocabulary makes format constrain strings.
+    auto sv = compileSchema(`{"$schema": "https://example.com/meta-all", "format": "ipv4"}`,
+            settings);
+    assert(!ok(sv, `"not-an-ip"`));
+    assert(ok(sv, `"127.0.0.1"`));
+}
+
+unittest  // a 2019-09 meta-schema's vocabulary URIs map to the right capabilities
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-2019", `{
+        "$schema": "https://json-schema.org/draft/2019-09/schema",
+        "$id": "https://example.com/meta-2019",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2019-09/vocab/core": true,
+            "https://json-schema.org/draft/2019-09/vocab/applicator": true,
+            "https://json-schema.org/draft/2019-09/vocab/validation": true,
+            "https://json-schema.org/draft/2019-09/vocab/meta-data": true,
+            "https://json-schema.org/draft/2019-09/vocab/format": true,
+            "https://json-schema.org/draft/2019-09/vocab/content": true
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    auto v = compileSchema(`{
+        "$schema": "https://example.com/meta-2019",
+        "type": "object",
+        "properties": {"a": {"type": "integer"}},
+        "unevaluatedProperties": false
+    }`, settings);
+    assert(ok(v, `{"a": 1}`));
+    assert(!ok(v, `{"b": 2}`));
+}
+
+unittest  // a custom meta-schema without $vocabulary falls back to its draft defaults
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-bare", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-bare"
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    auto v = compileSchema(`{"$schema": "https://example.com/meta-bare", "type": "string"}`,
+            settings);
+    assert(ok(v, `"x"`));
+    assert(!ok(v, "1"));
+}
+
+unittest  // a required vocabulary we do not implement is refused
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-unknown", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-unknown",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2020-12/vocab/core": true,
+            "https://example.com/vocab/custom": true
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    assertThrown!UnsupportedDialectException(
+            compileSchema(`{"$schema": "https://example.com/meta-unknown"}`, settings));
+}
+
+unittest  // an optional unknown vocabulary is tolerated
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-opt", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-opt",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2020-12/vocab/core": true,
+            "https://example.com/vocab/custom": false
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    auto v = compileSchema(`{"$schema": "https://example.com/meta-opt"}`, settings);
+    assert(ok(v, "1"));
+}
+
+unittest  // a meta-schema lacking the core vocabulary is refused
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-nocore", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-nocore",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2020-12/vocab/validation": true
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    assertThrown!UnsupportedDialectException(
+            compileSchema(`{"$schema": "https://example.com/meta-nocore"}`, settings));
+}
+
+unittest  // draft-07 definitions are walked so embedded $ref targets resolve
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {"pos": {"type": "integer", "minimum": 1}},
+        "properties": {"n": {"$ref": "#/definitions/pos"}}
+    }`);
+    assert(ok(v, `{"n": 3}`));
+    assert(!ok(v, `{"n": 0}`));
+}
+
+unittest  // draft-07 dependencies: array form and schema form
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "dependencies": {
+            "credit_card": ["billing_address"],
+            "name": {"properties": {"age": {"type": "integer"}}}
+        }
+    }`);
+    assert(ok(v, `{"credit_card": 1, "billing_address": "x"}`));
+    assert(!ok(v, `{"credit_card": 1}`));
+    assert(ok(v, `{"name": "n", "age": 3}`));
+    assert(!ok(v, `{"name": "n", "age": "three"}`));
+}
+
+unittest  // draft-07 tuple items with additionalItems
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "items": [{"type": "integer"}, {"type": "string"}],
+        "additionalItems": {"type": "boolean"}
+    }`);
+    assert(ok(v, `[1, "x"]`));
+    assert(ok(v, `[1, "x", true, false]`));
+    assert(!ok(v, `[1, "x", 3]`));
+}
+
+unittest  // content keywords compile (annotations; always pass)
+{
+    auto v = compileSchema(`{
+        "type": "string",
+        "contentEncoding": "base64",
+        "contentMediaType": "application/json",
+        "contentSchema": {"type": "object"}
+    }`);
+    assert(ok(v, `"anything"`));
+}
+
+unittest  // exclusiveMaximum / exclusiveMinimum bounds
+{
+    auto v = compileSchema(`{"exclusiveMaximum": 5, "exclusiveMinimum": 1}`);
+    assert(ok(v, "3"));
+    assert(!ok(v, "5"));
+    assert(!ok(v, "1"));
+}
+
+unittest  // object and array size bounds compile and apply
+{
+    auto v = compileSchema(`{"maxProperties": 2, "minProperties": 1}`);
+    assert(ok(v, `{"a": 1}`));
+    assert(!ok(v, `{}`));
+    assert(!ok(v, `{"a": 1, "b": 2, "c": 3}`));
+
+    auto a = compileSchema(`{"maxItems": 2, "minItems": 1}`);
+    assert(ok(a, "[1]"));
+    assert(!ok(a, "[]"));
+    assert(!ok(a, "[1,2,3]"));
+}
+
+unittest  // a ulong-range numeric bound compiles via the unsigned path
+{
+    auto v = compileSchema(`{"maximum": 18446744073709551615}`);
+    assert(ok(v, "1"));
+}
+
+unittest  // a non-negative integer keyword accepts an integral float and a huge uint
+{
+    assert(ok(compileSchema(`{"minLength": 2.0}`), `"abc"`));
+    assert(!ok(compileSchema(`{"minLength": 2.0}`), `"a"`));
+    // A ulong-range length clamps; nothing realistic exceeds it.
+    auto v = compileSchema(`{"minItems": 18446744073709551615}`);
+    assert(!ok(v, "[1,2,3]"));
+}
+
+unittest  // draft-07 ignores 2019-09+ keywords (dependentRequired, dependentSchemas)
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "dependentRequired": {"a": ["b"]},
+        "dependentSchemas": {"a": {"required": ["c"]}}
+    }`);
+    // Both are unknown keywords in draft-07, hence ignored.
+    assert(ok(v, `{"a": 1}`));
+}
+
+unittest  // schema-shape compile errors are reported
+{
+    assertThrown!SchemaCompileException(compileSchema(`{"$schema": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"properties": {"a": 1}}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"$id": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"$ref": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"properties": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"allOf": 1}`));
+}
+
+unittest  // validation-keyword compile errors are reported
+{
+    assertThrown!SchemaCompileException(compileSchema(`{"type": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"type": "bogus"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"enum": 1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"maximum": "x"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"minLength": 1.5}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"minLength": "x"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"minLength": -1}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"uniqueItems": "x"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"required": "x"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"dependentRequired": {"a": "notarray"}}`));
+}
+
+unittest  // a type array combines several type bits
+{
+    auto v = compileSchema(`{"type": ["integer", "boolean", "null"]}`);
+    assert(ok(v, "1"));
+    assert(ok(v, "true"));
+    assert(ok(v, "null"));
+    assert(!ok(v, `"x"`));
+}
+
+unittest  // $recursiveAnchor must be a boolean
+{
+    assertThrown!SchemaCompileException(compileSchema(`{
+        "$schema": "https://json-schema.org/draft/2019-09/schema",
+        "$recursiveAnchor": "yes"
+    }`));
+}
+
+unittest  // 2020-12 forbids a fragment on a base-changing $id
+{
+    assertThrown!SchemaCompileException(
+            compileSchema(`{"$id": "https://example.com/x#frag"}`));
+}
+
+unittest  // draft-07 tolerates a fragment on $id as a plain-name anchor
+{
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": "https://example.com/root#thing",
+        "definitions": {"t": {"$id": "#named", "type": "string"}},
+        "properties": {"p": {"$ref": "#named"}}
+    }`);
+    assert(ok(v, `{"p": "x"}`));
+    assert(!ok(v, `{"p": 1}`));
+}
+
+unittest  // $ref resolution failures throw with a clear message
+{
+    assertThrown!SchemaCompileException(compileSchema(`{"$ref": "#/does/not/exist"}`));
+    assertThrown!SchemaCompileException(compileSchema(`{"$ref": "#nosuchanchor"}`));
+}
+
+unittest  // a $ref into an unknown keyword is compiled on the fly
+{
+    auto v = compileSchema(`{
+        "$ref": "#/custom/inner",
+        "custom": {"inner": {"type": "integer"}}
+    }`);
+    assert(ok(v, "3"));
+    assert(!ok(v, `"x"`));
+}
+
+unittest  // an external reference is loaded through a resolver callback
+{
+    ValidatorSettings settings;
+    settings.resolver = (string uri) {
+        assert(uri == "https://example.com/remote");
+        return parseJson(`{"type": "string", "minLength": 1}`);
+    };
+    auto v = compileSchema(`{"$ref": "https://example.com/remote"}`, settings);
+    assert(ok(v, `"x"`));
+    assert(!ok(v, `""`));
+    assert(!ok(v, "1"));
+}
+
+unittest  // draftOf maps the well-known dialect URIs
+{
+    assert(draftOf(dialect201909) == Draft.draft2019_09);
+    assert(draftOf(dialect07) == Draft.draft07);
+    assert(draftOf("http://json-schema.org/draft-07/schema") == Draft.draft07);
+    assert(draftOf("https://json-schema.org/draft/2020-12/schema") == Draft.draft2020_12);
+    assert(draftOf("urn:unknown") == Draft.draft2020_12);
+}
+
+unittest  // ecmaShorthand rewrites ECMA classes outside a character class
+{
+    assert(ecmaShorthand(`\d`) == "[0-9]");
+    assert(ecmaShorthand(`\w`) == "[A-Za-z0-9_]");
+    assert(ecmaShorthand(`\D`) == "[^0-9]");
+    assert(ecmaShorthand(`\W`) == "[^A-Za-z0-9_]");
+    assert(ecmaShorthand(`\p{digit}`) == `\p{Nd}`);
+    // \a is an identity escape for 'a' in ECMA-262, not a control escape.
+    assert(ecmaShorthand(`\a`) == "a");
+    // An unrecognized escape is passed through unchanged.
+    assert(ecmaShorthand(`\q`) == `\q`);
+    // \s expands to the ECMA whitespace set.
+    assert(ecmaShorthand(`\s`).length > 2);
+}
+
+unittest  // ecmaShorthand keeps shorthands inside a character class compact
+{
+    // Inside [...] the expansion omits the surrounding brackets.
+    assert(ecmaShorthand(`[\d]`) == "[0-9]");
+    assert(ecmaShorthand(`[\w]`) == "[A-Za-z0-9_]");
+    assert(ecmaShorthand(`[\D]`) == `[\D]`);
+    assert(ecmaShorthand(`[\W]`) == `[\W]`);
+    assert(ecmaShorthand(`[\S]`) == `[\S]`);
+    assert(ecmaShorthand(`[\s]`).length > 2);
+}
+
+unittest  // patterns using ECMA shorthands compile and match
+{
+    auto v = compileSchema(`{"pattern": "^\\d+$"}`);
+    assert(ok(v, `"123"`));
+    assert(!ok(v, `"12a"`));
+}
+
+unittest  // \S outside a character class expands to a negated whitespace set
+{
+    const r = ecmaShorthand(`\S`);
+    assert(r.length > 3 && r[0 .. 2] == "[^");
+}
+
+unittest  // a meta-schema declaring the format-annotation vocabulary compiles
+{
+    auto store = new SchemaStore;
+    store.register("https://example.com/meta-fmt", `{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/meta-fmt",
+        "$vocabulary": {
+            "https://json-schema.org/draft/2020-12/vocab/core": true,
+            "https://json-schema.org/draft/2020-12/vocab/format-annotation": true
+        }
+    }`);
+    ValidatorSettings settings;
+    settings.store = store;
+    // format-annotation only: format is an annotation, so any string passes.
+    auto v = compileSchema(`{"$schema": "https://example.com/meta-fmt", "format": "ipv4"}`,
+            settings);
+    assert(ok(v, `"not-an-ip"`));
+}
+
+unittest  // 2020-12 treats definitions / additionalItems as unknown keywords
+{
+    // Neither is a 2020-12 keyword: both are ignored, so any instance validates.
+    auto v = compileSchema(`{
+        "definitions": {"x": {"type": "integer"}},
+        "additionalItems": {"type": "string"}
+    }`);
+    assert(ok(v, "true"));
+    assert(ok(v, `["anything", 1]`));
+}
+
+unittest  // an invalid regex in a pattern is a compile error
+{
+    assertThrown!SchemaCompileException(compileSchema(`{"pattern": "("}`));
+}
+
+unittest  // a $ref with a malformed JSON Pointer fragment is rejected
+{
+    assertThrown!SchemaCompileException(compileSchema(`{"$ref": "#/a~2b"}`));
+}
+
+unittest  // a resolved document registered under a distinct $id keeps its retrieval URI
+{
+    ValidatorSettings settings;
+    settings.resolver = (string uri) {
+        // The returned document declares a different canonical $id.
+        return parseJson(`{"$id": "https://example.com/canonical", "type": "string"}`);
+    };
+    auto v = compileSchema(`{"$ref": "https://example.com/retrieved"}`, settings);
+    assert(ok(v, `"x"`));
+    assert(!ok(v, "1"));
+}

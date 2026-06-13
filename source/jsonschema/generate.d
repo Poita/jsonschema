@@ -665,6 +665,62 @@ unittest  // SumType maps to anyOf over the variant schemas
     assert(s.get("anyOf").array_[2].get("type").string_ == "object");
 }
 
+unittest  // an enum maps to a string schema with the member names as an enum
+{
+    enum Color
+    {
+        red,
+        green,
+        blue
+    }
+
+    auto s = jsonSchemaOf!Color;
+    assert(s.get("type").string_ == "string");
+    auto e = s.get("enum");
+    assert(e !is null && e.array_.length == 3);
+    assert(e.array_[0].string_ == "red");
+    assert(e.array_[2].string_ == "blue");
+}
+
+unittest  // inline mode emits enum, datetime and sumtype schemas directly
+{
+    import std.datetime.date : Date;
+    import std.sumtype : SumType;
+
+    enum Suit
+    {
+        spades,
+        hearts
+    }
+
+    auto inline = GeneratorSettings(false, true);
+
+    auto en = jsonSchemaOf!Suit(inline);
+    assert(en.get("type").string_ == "string");
+    assert(en.get("enum").array_.length == 2);
+
+    auto dt = jsonSchemaOf!Date(inline);
+    assert(dt.get("format").string_ == "date");
+
+    auto sum = jsonSchemaOf!(SumType!(int, string))(inline);
+    assert(sum.get("anyOf").array_.length == 2);
+}
+
+unittest  // a fractional numeric facet serializes as a floating-point number
+{
+    import jsonschema.attributes : minimum, maximum;
+
+    static struct Measure
+    {
+        @minimum(1.5) @maximum(9.25) double value;
+    }
+
+    auto s = jsonSchemaOf!Measure;
+    auto v = s.get("properties").get("value");
+    assert(v.get("minimum").floating_ == 1.5);
+    assert(v.get("maximum").floating_ == 9.25);
+}
+
 unittest  // associative arrays map to additionalProperties
 {
     auto s = jsonSchemaOf!(int[string]);

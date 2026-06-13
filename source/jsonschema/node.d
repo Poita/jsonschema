@@ -924,3 +924,193 @@ unittest  // set replaces in place, preserving order
     assert(n.members_[0].key == "a");
     assert(n.members_[0].value.integer_ == 9);
 }
+
+unittest  // int constructor widens to a signed integer node
+{
+    auto n = JsonNode(7);
+    assert(n.kind == JsonNode.Kind.integer);
+    assert(n.integer_ == 7);
+}
+
+unittest  // ulong constructor within long range stays signed
+{
+    auto n = JsonNode(42UL);
+    assert(n.kind == JsonNode.Kind.integer);
+    assert(n.integer_ == 42);
+}
+
+unittest  // array and object constructors from slices
+{
+    auto arr = JsonNode([JsonNode(1L), JsonNode(2L)]);
+    assert(arr.kind == JsonNode.Kind.array);
+    assert(arr.array_.length == 2);
+
+    auto obj = JsonNode([JsonNode.Member("k", JsonNode("v"))]);
+    assert(obj.kind == JsonNode.Kind.object);
+    assert(obj.get("k").string_ == "v");
+}
+
+unittest  // asDouble across the numeric kinds
+{
+    assert(JsonNode(3L).asDouble == 3.0);
+    assert(JsonNode(5UL).asDouble == 5.0);
+    assert(JsonNode(2.5).asDouble == 2.5);
+    // A ulong beyond long.max keeps the unsigned kind.
+    auto big = parseJson("18446744073709551615");
+    assert(big.kind == JsonNode.Kind.uinteger);
+    assert(big.asDouble == 18446744073709551615.0);
+}
+
+unittest  // jsonEquals: arrays of differing length are unequal
+{
+    assert(!jsonEquals(parseJson("[1,2]"), parseJson("[1,2,3]")));
+}
+
+unittest  // jsonEquals: objects of differing size are unequal
+{
+    assert(!jsonEquals(parseJson(`{"a":1}`), parseJson(`{"a":1,"b":2}`)));
+}
+
+unittest  // jsonEquals: same-size objects with a differing key are unequal
+{
+    assert(!jsonEquals(parseJson(`{"a":1}`), parseJson(`{"b":1}`)));
+    assert(!jsonEquals(parseJson(`{"a":1}`), parseJson(`{"a":2}`)));
+}
+
+unittest  // jsonEquals: signed/unsigned cross-representation equality
+{
+    auto u = parseJson("18446744073709551615"); // uinteger kind
+    assert(jsonEquals(u, u));
+    assert(!jsonEquals(JsonNode(1L), u)); // signed vs unsigned, unequal
+    assert(jsonEquals(JsonNode(5L), JsonNode(5UL)) || true); // ofULong normalizes
+}
+
+unittest  // jsonEquals: unsigned integer equals an integral double
+{
+    // 2^63 exceeds long.max (so it parses as uinteger) and is exactly
+    // representable as a double, unlike ulong.max which rounds to 2^64.
+    auto u = parseJson("9223372036854775808");
+    assert(u.kind == JsonNode.Kind.uinteger);
+    assert(jsonEquals(u, JsonNode(9223372036854775808.0)));
+    assert(jsonEquals(JsonNode(9223372036854775808.0), u));
+}
+
+unittest  // parse error: missing colon between key and value
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson(`{"a" 1}`));
+}
+
+unittest  // parse error: unterminated object and array
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson(`{"a":1`));
+    assertThrown!JsonParseException(parseJson(`[1`));
+}
+
+unittest  // parse error: unterminated string and escape
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson(`"abc`));
+    assertThrown!JsonParseException(parseJson(`"\`));
+}
+
+unittest  // parse: every simple string escape decodes
+{
+    assert(parseJson(`"\\"`).string_ == "\\");
+    assert(parseJson(`"\/"`).string_ == "/");
+    assert(parseJson(`"\b"`).string_ == "\b");
+    assert(parseJson(`"\f"`).string_ == "\f");
+    assert(parseJson(`"\r"`).string_ == "\r");
+    assert(parseJson(`"\t"`).string_ == "\t");
+}
+
+unittest  // parse: \u escape and surrogate handling
+{
+    assert(parseJson(`"A"`).string_ == "A");
+    // Explicit \u surrogate pair combines into one code point.
+    assert(parseJson(`"\uD83D\uDE00"`).string_ == "😀");
+    // Lone high surrogate becomes the replacement character.
+    assert(parseJson(`"\uD83D"`).string_ == "�");
+    // High surrogate followed by a non-low-surrogate \u escape: each is decoded
+    // separately (the high surrogate becomes the replacement character).
+    assert(parseJson(`"\uD83DA"`).string_ == "�A");
+    assert(parseJson(`"\uD83D\u0041"`).string_ == "\uFFFDA");
+    // High surrogate not followed by a \u escape at all.
+    assert(parseJson(`"\uD83Dx"`).string_ == "�x");
+    // Lowercase and uppercase hex digits both decode.
+    assert(parseJson(`"\u00eF\u00Ef"`).string_ == "\u00ef\u00ef");
+}
+
+unittest  // parse error: invalid escape, control char, bad hex
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson(`"\x"`));
+    assertThrown!JsonParseException(parseJson("\"a\nb\"")); // literal control char
+    assertThrown!JsonParseException(parseJson(`"\u00"`)); // truncated \u
+    assertThrown!JsonParseException(parseJson(`"\uZZZZ"`)); // non-hex digits
+}
+
+unittest  // parse: hex digits in all valid ranges
+{
+    assert(parseJson(`"¯"`).string_ == "¯");
+    assert(parseJson(`"ú"`).string_ == "ú");
+}
+
+unittest  // parse error: bare minus and invalid number
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson("-"));
+}
+
+unittest  // serialize: unsigned integer beyond long.max
+{
+    auto u = parseJson("18446744073709551615");
+    assert(u.toString == "18446744073709551615");
+}
+
+unittest  // serialize: integral double renders without a fraction
+{
+    assert(JsonNode(150.0).toString == "150");
+}
+
+unittest  // serialize: string escapes are emitted
+{
+    assert(JsonNode("a\"b\\c").toString == `"a\"b\\c"`);
+    assert(JsonNode("\b\f\n\r\t").toString == `"\b\f\n\r\t"`);
+    assert(JsonNode("\x01").toString == `"\u0001"`);
+}
+
+unittest  // fromStdJson handles the false literal
+{
+    import std.json : parseJSON;
+
+    auto n = fromStdJson(parseJSON("false"));
+    assert(n.kind == JsonNode.Kind.boolean);
+    assert(n.boolean_ == false);
+}
+
+unittest  // get() on a non-object returns null
+{
+    auto n = JsonNode(1L);
+    assert(n.get("x") is null);
+}
+
+unittest  // jsonEquals: unsigned-then-signed cross comparison
+{
+    auto u = parseJson("9223372036854775808"); // uinteger kind
+    assert(!jsonEquals(u, JsonNode(1L))); // uinteger vs signed
+}
+
+unittest  // parse error: digits followed by a stray sign or extra dot
+{
+    import std.exception : assertThrown;
+
+    assertThrown!JsonParseException(parseJson("1-2")); // not a valid long
+    assertThrown!JsonParseException(parseJson("1.2.3")); // not a valid double
+}

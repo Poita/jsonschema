@@ -33,6 +33,20 @@ version (unittest)
     {
         return v.validate(parseJSON(instance), OutputFormat.flag).valid;
     }
+
+    // Basic output (the default) collects errors, so failing cases exercise the
+    // lazy error-message expressions that `flag` output skips.
+    private bool rejectsWithError(Validator v, string instance, string keywordSuffix)
+    {
+        const r = v.validate(parseJSON(instance));
+        if (r.valid)
+            return false;
+        foreach (e; r.errors)
+            if (e.keywordLocation.length >= keywordSuffix.length
+                    && e.keywordLocation[$ - keywordSuffix.length .. $] == keywordSuffix)
+                return true;
+        return false;
+    }
 }
 
 unittest  // boolean schemas
@@ -469,4 +483,141 @@ unittest  // validation works through a const Validator reference (shared read-o
     assert(v.validate(parseJSON(`"y"`)).valid);
     assert(v.isValid(parseJson(`"z"`)));
     assert(!v.isValid(parseJson(`""`)));
+}
+
+unittest  // numeric bound failures report the keyword (with collected messages)
+{
+    auto v = compileSchema(`{
+        "exclusiveMaximum": 5, "exclusiveMinimum": 1,
+        "maximum": 10, "minimum": 0
+    }`);
+    assert(rejectsWithError(v, "5", "/exclusiveMaximum"));
+    assert(rejectsWithError(v, "1", "/exclusiveMinimum"));
+    assert(accepts(v, "3"));
+}
+
+unittest  // type "number" accepts any number; non-numeric types reject floats
+{
+    assert(compileSchema(`{"type": "number"}`).accepts("1.5"));
+    assert(compileSchema(`{"type": "number"}`).accepts("3"));
+    // A float against a non-numeric, non-integer type is rejected.
+    assert(!compileSchema(`{"type": "string"}`).accepts("1.5"));
+    assert(!compileSchema(`{"type": "boolean"}`).accepts("2.5"));
+}
+
+unittest  // object size-bound failures report their keyword
+{
+    auto v = compileSchema(`{"maxProperties": 2, "minProperties": 1}`);
+    assert(rejectsWithError(v, `{"a":1,"b":2,"c":3}`, "/maxProperties"));
+    assert(rejectsWithError(v, `{}`, "/minProperties"));
+}
+
+unittest  // array size-bound failures report their keyword
+{
+    auto v = compileSchema(`{"maxItems": 2, "minItems": 1}`);
+    assert(rejectsWithError(v, "[1,2,3]", "/maxItems"));
+    assert(rejectsWithError(v, "[]", "/minItems"));
+}
+
+unittest  // dependentRequired failure carries the trigger/dependency message
+{
+    auto v = compileSchema(`{"dependentRequired": {"a": ["b"]}}`);
+    assert(rejectsWithError(v, `{"a": 1}`, "/dependentRequired"));
+    assert(accepts(v, `{"a": 1, "b": 2}`));
+}
+
+unittest  // contains bound failures report minContains / maxContains
+{
+    auto v = compileSchema(`{"contains": {"type": "integer"}, "minContains": 2, "maxContains": 3}`);
+    assert(rejectsWithError(v, "[1]", "/contains")); // fewer than minContains
+    assert(rejectsWithError(v, "[1,2,3,4]", "/maxContains"));
+    assert(accepts(v, "[1,2]"));
+}
+
+unittest  // a bare contains with no match reports the single-item message
+{
+    auto v = compileSchema(`{"contains": {"const": 9}}`);
+    assert(rejectsWithError(v, "[1,2,3]", "/contains"));
+    assert(accepts(v, "[1,9,3]"));
+}
+
+unittest  // unevaluatedProperties with a passing schema marks the property evaluated
+{
+    auto v = compileSchema(`{
+        "properties": {"a": {"type": "integer"}},
+        "unevaluatedProperties": {"type": "string"}
+    }`);
+    assert(v.accepts(`{"a": 1, "b": "x"}`)); // b validates against unevaluatedProperties
+    assert(!v.accepts(`{"a": 1, "b": 2}`)); // b is not a string
+}
+
+unittest  // unevaluatedItems with a passing schema marks the item evaluated
+{
+    auto v = compileSchema(`{
+        "prefixItems": [{"type": "integer"}],
+        "unevaluatedItems": {"type": "string"}
+    }`);
+    assert(v.accepts(`[1, "x", "y"]`));
+    assert(!v.accepts(`[1, "x", 2]`));
+}
+
+unittest  // uniqueItems compares across every JSON kind
+{
+    auto v = compileSchema(`{"uniqueItems": true}`);
+    assert(!v.accepts(`[null, null]`));
+    assert(!v.accepts(`[true, true]`));
+    assert(!v.accepts(`["a", "a"]`));
+    assert(!v.accepts(`[[1,2], [1,2]]`));
+    assert(!v.accepts(`[{"a":1,"b":2}, {"b":2,"a":1}]`)); // member order ignored
+    assert(v.accepts(`[null, true, "a", [1,2], {"a":1}]`));
+    assert(v.accepts(`[[1,2], [1,3]]`));
+    assert(v.accepts(`[{"a":1}, {"a":2}]`));
+    assert(v.accepts(`[true, false]`)); // booleans differing in value
+    assert(v.accepts(`[[1], [1,2]]`)); // arrays differing in length
+    assert(v.accepts(`[{"a":1}, {"a":1,"b":2}]`)); // objects differing in size
+}
+
+unittest  // const / enum equality across unsigned integers and nested structures
+{
+    // A const value beyond long.max exercises the unsigned number path.
+    auto big = compileSchema(`{"const": 18446744073709551615}`);
+    assert(big.accepts("18446744073709551615"));
+    assert(!big.accepts("1"));
+
+    // A const with a floating-point value exercises the float number path.
+    auto f = compileSchema(`{"const": 2.5}`);
+    assert(f.accepts("2.5"));
+    assert(!f.accepts("2"));
+
+    auto nested = compileSchema(`{"const": {"a": [1, {"b": 2}]}}`);
+    assert(nested.accepts(`{"a": [1, {"b": 2}]}`));
+    assert(!nested.accepts(`{"a": [1, {"b": 3}]}`)); // nested object value differs
+    assert(!nested.accepts(`{"a": [1, 2]}`)); // array element kind differs
+    assert(!nested.accepts(`{"a": [9, {"b": 2}]}`)); // array element value differs
+}
+
+unittest  // draft-07 $ref suppresses sibling keywords and adopts the target's result
+{
+    // The sibling "type": "string" is ignored because a draft-07 $ref is exclusive;
+    // only the referenced integer schema applies.
+    auto v = compileSchema(`{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {"i": {"type": "integer"}},
+        "type": "string",
+        "$ref": "#/definitions/i"
+    }`);
+    assert(v.accepts("3"));
+    assert(!v.accepts(`"x"`));
+}
+
+unittest  // an unevaluatedItems pass sees items marked by a contains inside allOf
+{
+    auto v = compileSchema(`{
+        "allOf": [{"contains": {"const": 2}}],
+        "unevaluatedItems": false
+    }`);
+    // index 1 (the 2) is evaluated by contains within allOf and merged outward;
+    // the remaining items are not, so unevaluatedItems:false rejects them.
+    assert(!v.accepts(`[1, 2, 3]`));
+    assert(v.accepts(`[2]`));
 }
