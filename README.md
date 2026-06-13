@@ -1,5 +1,6 @@
 # jsonschema
 
+[![Dub version](https://img.shields.io/dub/v/jsonschema.svg)](https://code.dlang.org/packages/jsonschema)
 [![CI](https://github.com/Poita/jsonschema/actions/workflows/ci.yml/badge.svg)](https://github.com/Poita/jsonschema/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Poita/jsonschema/branch/master/graph/badge.svg)](https://codecov.io/gh/Poita/jsonschema)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
