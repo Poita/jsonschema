@@ -1,0 +1,7 @@
+# competitor build artifacts and local bench output
+competitors/js/node_modules/
+competitors/js/package-lock.json
+competitors/rust/target/
+competitors/rust/Cargo.lock
+xlang-results.json
+results.json
