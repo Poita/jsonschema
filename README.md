@@ -182,9 +182,18 @@ auto schema = jsonSchemaOf!Point(settings);   // no $defs/$ref anywhere
 A directly or mutually recursive type cannot be inlined (the expansion would
 never terminate). Such a type is rejected naming the offending type — at
 compile time via the compile-time-settings form
-`jsonSchemaOf!(T, settings)`, or by throwing at runtime via
+`jsonSchemaOf!(T, settings)()`, or by throwing at runtime via
 `jsonSchemaOf!T(settings)`. Recursive types are fine in the default
 (`$defs`/`$ref`) mode.
+
+When the settings are compile-time constants, prefer the compile-time form so
+the recursive-inline rejection is a build error rather than a runtime
+exception:
+
+```d
+enum settings = GeneratorSettings(false, true);   // inlineSubschemas = true
+auto schema = jsonSchemaOf!(Point, settings)();   // rejected at compile time if Point is recursive
+```
 
 Constraint UDAs (`jsonschema.attributes`):
 

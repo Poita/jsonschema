@@ -71,14 +71,18 @@ struct GeneratorSettings
     bool inlineSubschemas = false;
 }
 
-/// Generate the JSON Schema for `T`.
+/// Generate the JSON Schema for `T` with runtime-known settings.
 ///
 /// With `settings.inlineSubschemas` set, struct types are expanded inline at
 /// every use site and the document contains no `$defs`/`$ref` — for consumers
 /// that don't follow `$ref` inside an embedded schema. A directly or mutually
-/// recursive type cannot be inlined; requesting it throws. To have that
-/// rejection happen at compile time instead, use the compile-time-settings
-/// overload `jsonSchemaOf!(T, settings)`.
+/// recursive type cannot be inlined; requesting it throws.
+///
+/// Use this overload only when `settings` is not known until runtime. When the
+/// settings are compile-time constants, prefer the compile-time-settings
+/// overload `jsonSchemaOf!(T, settings)()`: it is otherwise identical but
+/// rejects the recursive-inline case with a `static assert` at compile time
+/// rather than throwing at runtime.
 JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
 {
     enum recName = inlineRecursionName!T;
@@ -121,6 +125,11 @@ JsonNode jsonSchemaOf(T)(GeneratorSettings settings = GeneratorSettings.init)
 /// Identical to the runtime overload, except that requesting
 /// `inlineSubschemas` for a recursive type is rejected with a `static assert`
 /// naming the offending type, rather than throwing at runtime.
+///
+/// Prefer this overload whenever the settings are compile-time constants: the
+/// recursive-inline rejection then surfaces as a build error instead of a
+/// runtime exception. For example, `jsonSchemaOf!(T, GeneratorSettings(false,
+/// true))()`.
 JsonNode jsonSchemaOf(T, GeneratorSettings settings)()
 {
     static if (settings.inlineSubschemas)
