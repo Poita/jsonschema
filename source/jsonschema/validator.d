@@ -474,7 +474,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
     foreach (i, sub; s.allOf)
     {
         Evaluated se;
-        if (evalSchema!A(sub, v, ip, loc(st, kp, "/allOf/" ~ i.to!string), st, se))
+        if (evalChild!A(sub, v, ip, loc(st, kp, "/allOf/" ~ i.to!string), st, se))
             ev.merge(se);
         else
         {
@@ -490,7 +490,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
         foreach (i, sub; s.anyOf)
         {
             Evaluated se;
-            if (evalSchema!A(sub, v, ip, loc(st, kp, "/anyOf/" ~ i.to!string), st, se))
+            if (evalChild!A(sub, v, ip, loc(st, kp, "/anyOf/" ~ i.to!string), st, se))
             {
                 any = true;
                 ev.merge(se);
@@ -515,7 +515,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
         foreach (i, sub; s.oneOf)
         {
             Evaluated se;
-            if (evalSchema!A(sub, v, ip, loc(st, kp, "/oneOf/" ~ i.to!string), st, se))
+            if (evalChild!A(sub, v, ip, loc(st, kp, "/oneOf/" ~ i.to!string), st, se))
             {
                 matches++;
                 ev.merge(se);
@@ -541,7 +541,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         const mark = st.errors.length;
         Evaluated se; // annotations inside "not" are never retained
-        const r = evalSchema!A(s.notSchema, v, ip, loc(st, kp, "/not"), st, se);
+        const r = evalChild!A(s.notSchema, v, ip, loc(st, kp, "/not"), st, se);
         shrinkErrors(st, mark);
         if (r)
         {
@@ -553,7 +553,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
     {
         const mark = st.errors.length;
         Evaluated condEv;
-        const condOk = evalSchema!A(s.ifSchema, v, ip, loc(st, kp, "/if"), st, condEv);
+        const condOk = evalChild!A(s.ifSchema, v, ip, loc(st, kp, "/if"), st, condEv);
         shrinkErrors(st, mark); // "if" outcomes are not failures
         if (condOk)
         {
@@ -561,7 +561,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
             if (s.thenSchema !is null)
             {
                 Evaluated se;
-                if (evalSchema!A(s.thenSchema, v, ip, loc(st, kp, "/then"), st, se))
+                if (evalChild!A(s.thenSchema, v, ip, loc(st, kp, "/then"), st, se))
                     ev.merge(se);
                 else
                     ok = false;
@@ -570,7 +570,7 @@ private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
         else if (s.elseSchema !is null)
         {
             Evaluated se;
-            if (evalSchema!A(s.elseSchema, v, ip, loc(st, kp, "/else"), st, se))
+            if (evalChild!A(s.elseSchema, v, ip, loc(st, kp, "/else"), st, se))
                 ev.merge(se);
             else
                 ok = false;
