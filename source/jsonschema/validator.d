@@ -305,20 +305,10 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         fail(st, ip, loc(st, kp, "/const"), "instance does not equal the const value");
         ok = false;
     }
-    if (s.hasEnum)
+    if (s.hasEnum && !enumContains!A(v, kind, s.enumValues))
     {
-        bool found;
-        foreach (ref e; s.enumValues)
-            if (valueEqualsNode!A(v, e, kind))
-            {
-                found = true;
-                break;
-            }
-        if (!found)
-        {
-            fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
-            ok = false;
-        }
+        fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
+        ok = false;
     }
 
     // --- validation: numbers ---
@@ -642,14 +632,6 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         if (!st.collect)
             return false;
     }
-    foreach (name; s.required)
-        if (A.objectGet(v, name) is null)
-        {
-            fail(st, ip, loc(st, kp, "/required"), "missing required property '" ~ name ~ "'");
-            ok = false;
-            if (!st.collect)
-                return false;
-        }
     foreach (trigger, names; s.dependentRequired)
         if (A.objectGet(v, trigger) !is null)
             foreach (name; names)
@@ -675,6 +657,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             }
         }
 
+    size_t seenRequired;
     if (s.properties.length || s.patternProperties.length
             || s.additionalProperties !is null || s.propertyNames !is null)
     {
@@ -686,8 +669,10 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             bool matched;
             if (auto p = key in s.properties)
             {
+                if (p.required)
+                    seenRequired++;
                 Evaluated se;
-                if (evalSchema!A(*p, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
+                if (evalSchema!A(p.schema, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
                     ev.markProp(key);
                 else
                     failed = true;
@@ -725,6 +710,28 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         });
         if (failed)
             ok = false;
+    }
+
+    // required. In collect mode, report each missing name precisely. In flag
+    // mode, the property scan above already counted the required properties it
+    // saw (`seenRequired`), so a shortfall means one is absent; names that are
+    // not properties (`requiredExtra`) still need an explicit lookup.
+    if (st.collect)
+    {
+        foreach (name; s.required)
+            if (A.objectGet(v, name) is null)
+            {
+                fail(st, ip, loc(st, kp, "/required"), "missing required property '" ~ name ~ "'");
+                ok = false;
+            }
+    }
+    else
+    {
+        if (!ok || seenRequired < s.requiredInProps)
+            return false;
+        foreach (name; s.requiredExtra)
+            if (A.objectGet(v, name) is null)
+                return false;
     }
     return ok;
 }
@@ -973,6 +980,48 @@ private JsonNumber numberOfNode(in JsonNode n) pure nothrow
         return JsonNumber.ofULong(n.uinteger_);
     default:
         return JsonNumber.ofDouble(n.floating_);
+    }
+}
+
+/// Membership test for `enum`. Extracts the instance's scalar once and
+/// compares it against each candidate, rather than re-dispatching and
+/// re-extracting per value as a `valueEqualsNode` loop would. Composite
+/// instances (array/object) fall back to the general deep comparison.
+package bool enumContains(A)(in A.Value v, JsonKind kind, const JsonNode[] values)
+{
+    alias K = JsonNode.Kind;
+    final switch (kind)
+    {
+    case JsonKind.null_:
+        foreach (ref e; values)
+            if (e.kind == K.null_)
+                return true;
+        return false;
+    case JsonKind.boolean:
+        const b = A.getBoolean(v);
+        foreach (ref e; values)
+            if (e.kind == K.boolean && e.boolean_ == b)
+                return true;
+        return false;
+    case JsonKind.string_:
+        const str = A.getString(v);
+        foreach (ref e; values)
+            if (e.kind == K.string_ && e.string_ == str)
+                return true;
+        return false;
+    case JsonKind.integer:
+    case JsonKind.floating:
+        const n = A.getNumber(v);
+        foreach (ref e; values)
+            if (e.isNumber && cmpNumbers(n, numberOfNode(e)) == 0)
+                return true;
+        return false;
+    case JsonKind.array:
+    case JsonKind.object:
+        foreach (ref e; values)
+            if (valueEqualsNode!A(v, e, kind))
+                return true;
+        return false;
     }
 }
 

@@ -363,6 +363,20 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
             continue;
         // Unknown keyword (or disabled vocabulary): an annotation; ignored.
     }
+
+    // Partition `required` against `properties`: a name that is also a property
+    // gets its `PropEntry.required` bit set (so the property scan counts it),
+    // the rest go to `requiredExtra` for an explicit instance lookup.
+    foreach (name; s.required)
+    {
+        if (auto p = name in s.properties)
+        {
+            p.required = true;
+            s.requiredInProps++;
+        }
+        else
+            s.requiredExtra ~= name;
+    }
     return s;
 }
 
@@ -531,8 +545,8 @@ private bool compileApplicatorKeyword(Session sess, CompiledSchema s, string key
     case "properties":
         requireObject(val, key);
         foreach (ref m; val.members_)
-            s.properties[m.key] = walk(sess, m.value,
-                    frames.extend("/properties/" ~ escapeToken(m.key)), null);
+            s.properties[m.key] = PropEntry(walk(sess, m.value,
+                    frames.extend("/properties/" ~ escapeToken(m.key)), null));
         return true;
     case "patternProperties":
         requireObject(val, key);

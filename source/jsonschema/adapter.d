@@ -149,9 +149,17 @@ struct StdJsonAdapter
         return JSONValue(s);
     }
 
-    static JsonKind kindOf(in Value v)
+    // The public JSONValue getters (`.str`, `.integer`, `.arrayNoRef`, …) each
+    // re-`enforce` the type tag and live in libphobos, so without LTO every
+    // access is an out-of-line call with a redundant check — the validator has
+    // already classified the node via `kindOf`. These accessors read the
+    // private `store` union and `type_tag` directly (active member only, picked
+    // by the tag), which inlines and drops the per-access tax. `__traits(
+    // getMember)` deliberately bypasses `private` for this; it ties us to
+    // std.json's field layout, guarded by the adapter's correctness tests.
+    static JsonKind kindOf(in Value v) @trusted
     {
-        final switch (v.type)
+        final switch (__traits(getMember, v, "type_tag"))
         {
         case JSONType.null_:
             return JsonKind.null_;
@@ -172,54 +180,71 @@ struct StdJsonAdapter
         }
     }
 
-    static bool getBoolean(in Value v)
+    static bool getBoolean(in Value v) @trusted
     {
-        return v.type == JSONType.true_;
+        return __traits(getMember, v, "type_tag") == JSONType.true_;
     }
 
-    static JsonNumber getNumber(in Value v)
+    static JsonNumber getNumber(in Value v) @trusted
     {
-        switch (v.type)
+        switch (__traits(getMember, v, "type_tag"))
         {
         case JSONType.integer:
-            return JsonNumber.ofLong(v.integer);
+            return JsonNumber.ofLong(__traits(getMember, v, "store").integer);
         case JSONType.uinteger:
-            return JsonNumber.ofULong(v.uinteger);
+            return JsonNumber.ofULong(__traits(getMember, v, "store").uinteger);
         default:
-            return JsonNumber.ofDouble(v.floating);
+            return JsonNumber.ofDouble(__traits(getMember, v, "store").floating);
         }
     }
 
-    static string getString(in Value v)
+    static string getString(in Value v) @trusted
     {
-        return v.str;
+        return __traits(getMember, v, "store").str;
     }
 
-    static size_t arrayLength(in Value v)
+    static size_t arrayLength(in Value v) @trusted
     {
-        return v.arrayNoRef.length;
+        return __traits(getMember, v, "store").array.length;
     }
 
-    static const(Value) arrayAt(in Value v, size_t index)
+    static const(Value) arrayAt(in Value v, size_t index) @trusted
     {
-        return v.arrayNoRef[index];
+        return __traits(getMember, v, "store").array[index];
     }
 
-    static size_t objectLength(in Value v)
+    static size_t objectLength(in Value v) @trusted
     {
-        return v.objectNoRef.length;
+        auto o = &__traits(getMember, v, "store").object;
+        return o.isOrdered ? o.ordered.length : o.unordered.length;
     }
 
     static const(Value)* objectGet(in Value v, string key) @trusted
     {
-        // The AA returned by objectNoRef is a heap handle; a member pointer
-        // stays valid after the parameter copy goes out of scope.
-        return key in v.objectNoRef;
+        // The union members are heap handles/slices, so a member pointer stays
+        // valid after the by-value parameter copy goes out of scope.
+        auto o = &__traits(getMember, v, "store").object;
+        if (o.isOrdered)
+        {
+            foreach (ref m; o.ordered)
+                if (m.key == key)
+                    return &m.value;
+            return null;
+        }
+        return key in o.unordered;
     }
 
-    static int objectEach(in Value v, scope int delegate(string key, in Value val) @safe dg)
+    static int objectEach(in Value v, scope int delegate(string key, in Value val) @safe dg) @trusted
     {
-        foreach (key, ref val; v.objectNoRef)
+        auto o = &__traits(getMember, v, "store").object;
+        if (o.isOrdered)
+        {
+            foreach (ref m; o.ordered)
+                if (auto r = dg(m.key, m.value))
+                    return r;
+            return 0;
+        }
+        foreach (key, ref val; o.unordered)
             if (auto r = dg(key, val))
                 return r;
         return 0;

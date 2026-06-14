@@ -229,6 +229,16 @@ struct PatternProperty
     CompiledSchema schema;
 }
 
+/// `properties` entry: the subschema plus whether the property name also
+/// appears in `required`. The `required` bit lets `checkObject` confirm that a
+/// required property is present during its single pass over the instance's
+/// members, instead of a second hashing lookup per required name.
+struct PropEntry
+{
+    CompiledSchema schema;
+    bool required;
+}
+
 /// Bit flags for the `type` keyword.
 enum TypeBit : ubyte
 {
@@ -304,6 +314,12 @@ final class CompiledSchema
     long maxProperties = absent;
     long minProperties = absent;
     string[] required;
+    /// `required` names that are not also keys of `properties`; these still
+    /// need an explicit instance lookup. Names that *are* properties are
+    /// counted by `requiredInProps` and confirmed during the property scan.
+    string[] requiredExtra;
+    /// Number of `required` names that are also keys of `properties`.
+    size_t requiredInProps;
     string[][string] dependentRequired;
 
     // --- applicators: in place ---
@@ -317,7 +333,7 @@ final class CompiledSchema
     CompiledSchema[string] dependentSchemas;
 
     // --- applicators: children ---
-    CompiledSchema[string] properties;
+    PropEntry[string] properties;
     PatternProperty[] patternProperties;
     CompiledSchema additionalProperties;
     CompiledSchema propertyNames;
