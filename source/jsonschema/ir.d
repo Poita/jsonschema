@@ -7,6 +7,7 @@
 module jsonschema.ir;
 
 import jsonschema.adapter : JsonNumber;
+import jsonschema.fastregex : FastRegex;
 import jsonschema.node : JsonNode;
 import std.regex : Regex;
 
@@ -302,6 +303,9 @@ final class CompiledSchema
     bool hasPattern;
     string patternSource;
     Regex!char pattern;
+    /// Fast-path matcher for the common ASCII pattern subset; when
+    /// `fastPattern.compiled`, the evaluator uses it instead of `pattern`.
+    FastRegex fastPattern;
 
     // --- validation: arrays ---
     long maxItems = absent;

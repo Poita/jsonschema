@@ -726,9 +726,16 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
     }
     if (s.hasPattern)
     {
-        import std.regex : matchFirst;
+        bool matched;
+        if (s.fastPattern.compiled)
+            matched = s.fastPattern.matches(str);
+        else
+        {
+            import std.regex : matchFirst;
 
-        if (matchFirst(str, s.pattern).empty)
+            matched = !matchFirst(str, s.pattern).empty;
+        }
+        if (!matched)
         {
             fail(st, ip, loc(st, kp, "/pattern"), "string does not match pattern '" ~ s.patternSource ~ "'");
             ok = false;

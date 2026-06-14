@@ -6,6 +6,7 @@
 module jsonschema.compiler;
 
 import jsonschema.adapter : JsonNumber;
+import jsonschema.fastregex;
 import jsonschema.ir;
 import jsonschema.node;
 import jsonschema.pointer : escapeToken, parsePointer, evaluatePointer;
@@ -755,6 +756,7 @@ private bool compileValidationKeyword(CompiledSchema s, string key, in JsonNode 
         s.hasPattern = true;
         s.patternSource = val.string_;
         s.pattern = compileRegex(val.string_, "pattern");
+        s.fastPattern = jsonschema.fastregex.compile(val.string_);
         return true;
     case "maxItems":
         s.maxItems = nonNegativeIntegerOf(val, key);
