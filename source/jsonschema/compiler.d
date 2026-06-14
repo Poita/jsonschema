@@ -399,6 +399,20 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
         else
             s.requiredExtra ~= name;
     }
+
+    // Flatten `properties` into parallel arrays sorted by key for the hot
+    // binary-search lookup in `checkObject`. The `required` bits set above are
+    // already in place, so the copied `PropEntry`s carry them.
+    if (s.properties.length)
+    {
+        import std.algorithm : sort;
+
+        s.propKeys = s.properties.keys;
+        sort(s.propKeys);
+        s.propVals.length = s.propKeys.length;
+        foreach (i, k; s.propKeys)
+            s.propVals[i] = s.properties[k];
+    }
     return s;
 }
 

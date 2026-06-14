@@ -345,6 +345,12 @@ final class CompiledSchema
 
     // --- applicators: children ---
     PropEntry[string] properties;
+    /// `properties` flattened into parallel arrays sorted by key, for the hot
+    /// per-member lookup in `checkObject`: an inlined binary search here avoids
+    /// the out-of-line druntime calls (`_aaInX`, `hashOf`) of an `in` on the
+    /// associative array. Built at the end of compilation.
+    string[] propKeys;
+    PropEntry[] propVals;
     PatternProperty[] patternProperties;
     CompiledSchema additionalProperties;
     CompiledSchema propertyNames;

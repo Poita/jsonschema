@@ -727,6 +727,40 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
     return ok;
 }
 
+/// Binary search for `key` in the sorted `propKeys`, returning its `PropEntry`
+/// (or null). Inlined byte comparison, so no out-of-line druntime call — unlike
+/// an `in` on the `properties` associative array.
+private const(PropEntry)* findProp(const string[] keys, const PropEntry[] vals, string key)
+        @trusted @nogc nothrow pure
+{
+    size_t lo = 0, hi = keys.length;
+    while (lo < hi)
+    {
+        const mid = (lo + hi) >> 1;
+        const k = keys[mid];
+        // Lexicographic compare, shortest-first on a shared prefix.
+        const n = key.length < k.length ? key.length : k.length;
+        int c = 0;
+        foreach (i; 0 .. n)
+            if (key[i] != k[i])
+            {
+                c = cast(ubyte) key[i] < cast(ubyte) k[i] ? -1 : 1;
+                break;
+            }
+        if (c == 0)
+        {
+            if (key.length == k.length)
+                return &vals[mid];
+            c = key.length < k.length ? -1 : 1;
+        }
+        if (c < 0)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    return null;
+}
+
 private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         string kp, ref EvalState!A st, ref Evaluated ev)
 {
@@ -782,7 +816,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         A.objectEach(v, (string key, in A.Value member) {
             const mp = loc(st, ip, "/" ~ escapeToken(key));
             bool matched;
-            if (auto p = key in s.properties)
+            if (auto p = findProp(s.propKeys, s.propVals, key))
             {
                 if (p.required)
                     seenRequired++;
