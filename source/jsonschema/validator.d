@@ -653,28 +653,65 @@ private bool checkNumber(A)(const CompiledSchema s, in JsonNumber n, string ip,
     return ok;
 }
 
+/// Number of Unicode code points in valid UTF-8: every byte that is not a
+/// continuation byte (`10xxxxxx`) starts one code point. Cheaper than
+/// `std.utf.count`, which fully decodes (and validates) each code point.
+private size_t countCodePoints(string s) @trusted @nogc nothrow pure
+{
+    size_t n;
+    foreach (immutable ubyte b; cast(const(ubyte)[]) s)
+        if ((b & 0xC0) != 0x80)
+            n++;
+    return n;
+}
+
 private bool checkString(A)(const CompiledSchema s, string str, string ip,
         string kp, ref EvalState!A st)
 {
     bool ok = true;
     if (s.maxLength != absent || s.minLength != absent)
     {
-        import std.utf : count;
-
-        const len = () @trusted { return str.count; }();
-        if (s.maxLength != absent && len > s.maxLength)
+        // `minLength`/`maxLength` count Unicode code points, but code points are
+        // bounded by byte length: blen/4 <= codePoints <= blen. Those bounds
+        // resolve most cases from the O(1) byte length alone; only when they are
+        // inconclusive do we count code points (cheaply, without decoding).
+        const blen = str.length;
+        long cp = -1;
+        if (s.maxLength != absent)
         {
-            fail(st, ip, loc(st, kp, "/maxLength"), "string is longer than maxLength");
-            ok = false;
-            if (!st.collect)
-                return false;
+            if (blen > cast(size_t) s.maxLength)
+            {
+                cp = countCodePoints(str);
+                if (cp > s.maxLength)
+                {
+                    fail(st, ip, loc(st, kp, "/maxLength"), "string is longer than maxLength");
+                    ok = false;
+                    if (!st.collect)
+                        return false;
+                }
+            }
         }
-        if (s.minLength != absent && len < s.minLength)
+        if (s.minLength != absent)
         {
-            fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
-            ok = false;
-            if (!st.collect)
-                return false;
+            if (blen < cast(size_t) s.minLength)
+            {
+                fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
+                ok = false;
+                if (!st.collect)
+                    return false;
+            }
+            else if ((blen + 3) / 4 < cast(size_t) s.minLength)
+            {
+                if (cp < 0)
+                    cp = countCodePoints(str);
+                if (cp < s.minLength)
+                {
+                    fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
+                    ok = false;
+                    if (!st.collect)
+                        return false;
+                }
+            }
         }
     }
     if (s.hasPattern)
