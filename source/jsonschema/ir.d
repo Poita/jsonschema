@@ -331,6 +331,17 @@ final class CompiledSchema
     CompiledSchema thenSchema;
     CompiledSchema elseSchema;
     CompiledSchema[string] dependentSchemas;
+    /// True when any of `allOf`/`anyOf`/`oneOf`/`not`/`if` is present. Lets the
+    /// evaluator skip the (frame-heavy) in-place applicator helper entirely for
+    /// the common schema that has none.
+    bool hasInPlaceApplicators;
+    /// True when this schema constrains only scalar instances — `type`, `enum`,
+    /// `const`, and the numeric/string bound keywords — with no references,
+    /// applicators, object/array child keywords, `unevaluated*`, format
+    /// assertion, or content. Such a node cannot recurse, so the evaluator
+    /// validates it through a tiny fast path that skips the depth guard, the
+    /// dynamic-scope stack, and the reference/applicator cascade.
+    bool isSimpleScalar;
 
     // --- applicators: children ---
     PropEntry[string] properties;

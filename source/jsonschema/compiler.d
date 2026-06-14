@@ -27,6 +27,7 @@ Validator compileSchema(JsonNode doc, ValidatorSettings settings = ValidatorSett
     resolvePendingRefs(sess);
     auto validator = new Validator(root.root, settings);
     validator.usesUnevaluated = sess.usesUnevaluated;
+    validator.usesDynamicScope = sess.usesDynamicScope;
     return validator;
 }
 
@@ -64,6 +65,11 @@ package final class Session
     /// `unevaluatedProperties` or `unevaluatedItems`. When false, the evaluator
     /// can skip all `Evaluated` annotation bookkeeping.
     bool usesUnevaluated;
+    /// Set when any `$dynamicRef`/`$recursiveRef` resolves through the dynamic
+    /// scope. When false, the evaluator never consults the dynamic-scope stack,
+    /// so it can skip maintaining it entirely (avoiding a per-validation
+    /// allocation for the root push).
+    bool usesDynamicScope;
 
     this(SchemaStore store, ValidatorSettings settings) pure nothrow
     {
@@ -363,6 +369,22 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
             continue;
         // Unknown keyword (or disabled vocabulary): an annotation; ignored.
     }
+
+    s.hasInPlaceApplicators = s.allOf.length > 0 || s.anyOf.length > 0
+        || s.oneOf.length > 0 || s.notSchema !is null || s.ifSchema !is null;
+
+    s.isSimpleScalar = !s.isBoolean && s.refInfo is null && s.dynRefInfo is null
+        && !s.hasInPlaceApplicators && !s.hasFormat
+        && s.properties.length == 0 && s.patternProperties.length == 0
+        && s.additionalProperties is null && s.propertyNames is null
+        && s.required.length == 0 && s.dependentRequired.length == 0
+        && s.dependentSchemas.length == 0
+        && s.maxProperties == absent && s.minProperties == absent
+        && !s.hasPrefixItems && s.itemsSchema is null
+        && s.additionalItemsSchema is null && s.containsSchema is null
+        && s.maxItems == absent && s.minItems == absent && !s.uniqueItems
+        && s.unevaluatedProperties is null && s.unevaluatedItems is null
+        && s.contentSchema is null;
 
     // Partition `required` against `properties`: a name that is also a property
     // gets its `PropEntry.required` bit set (so the property scan counts it),
@@ -989,12 +1011,16 @@ private void resolveRef(Session sess, SchemaRef r)
         // dynamic anchor); otherwise it behaves as a plain `$ref`.
         r.anchorName = "";
         r.dynamicCandidate = ("" in res.dynamicAnchors) !is null;
+        if (r.dynamicCandidate)
+            sess.usesDynamicScope = true;
     }
     else if (r.dynamic && anchorName.length)
     {
         r.anchorName = anchorName;
         auto dyn = anchorName in res.dynamicAnchors;
         r.dynamicCandidate = dyn !is null && *dyn is target;
+        if (r.dynamicCandidate)
+            sess.usesDynamicScope = true;
     }
 }
 

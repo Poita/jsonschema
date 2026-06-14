@@ -33,6 +33,7 @@ final class Validator
     /// `unevaluatedItems` anywhere. When false, the evaluator skips all
     /// `Evaluated` annotation bookkeeping since nothing consults it.
     package bool usesUnevaluated;
+    package bool usesDynamicScope;
 
     package this(CompiledSchema root, ValidatorSettings settings) pure nothrow
     {
@@ -89,6 +90,7 @@ final class Validator
         st.maxDepth = settings.maxDepth;
         st.assertFormats = settings.formatMode == FormatMode.assertion;
         st.tracksAnnotations = usesUnevaluated;
+        st.tracksDynamicScope = usesDynamicScope;
         Evaluated ev;
         const ok = evalSchema!A(root, instance, "", "", st, ev);
         return ValidationResult(ok, st.errors);
@@ -125,6 +127,7 @@ private struct EvalState(A)
     bool assertFormats;
     bool depthExceeded;
     bool tracksAnnotations;
+    bool tracksDynamicScope;
     size_t depth;
     size_t maxDepth;
 }
@@ -239,14 +242,15 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     }
 
     bool pushed;
-    if (s.resource !is null && (st.dynStack.length == 0 || st.dynStack[$ - 1]!is s.resource))
+    if (st.tracksDynamicScope && s.resource !is null
+            && (st.dynStack.length == 0 || st.dynStack[$ - 1]!is s.resource))
     {
         st.dynStack ~= s.resource;
         pushed = true;
     }
     scope (exit)
         if (pushed)
-            st.dynStack.length--;
+            st.dynStack = st.dynStack[0 .. $ - 1];
 
     bool ok = true;
     const kind = A.kindOf(v);
@@ -329,6 +333,134 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         return false;
 
     // --- in-place applicators ---
+    if (s.hasInPlaceApplicators && !evalInPlace!A(s, v, ip, kp, st, ev))
+    {
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+
+    if (!st.collect && !ok)
+        return false;
+
+    // --- objects ---
+    if (kind == JsonKind.object)
+        ok &= checkObject!A(s, v, ip, kp, st, ev);
+
+    if (!st.collect && !ok)
+        return false;
+
+    // --- arrays ---
+    if (kind == JsonKind.array)
+        ok &= checkArray!A(s, v, ip, kp, st, ev);
+
+    if (!st.collect && !ok)
+        return false;
+
+    // --- unevaluated*, after everything else at this location ---
+    if (s.unevaluatedProperties !is null && kind == JsonKind.object)
+    {
+        bool failed;
+        A.objectEach(v, (string key, in A.Value member) {
+            if (ev.hasProp(key))
+                return 0;
+            Evaluated se;
+            if (evalChild!A(s.unevaluatedProperties, member,
+                loc(st, ip, "/" ~ escapeToken(key)), loc(st, kp, "/unevaluatedProperties"), st, se))
+                ev.markProp(key);
+            else
+                failed = true;
+            return 0;
+        });
+        if (failed)
+        {
+            fail(st, ip, loc(st, kp, "/unevaluatedProperties"), "unevaluated properties do not validate");
+            ok = false;
+        }
+    }
+    if (s.unevaluatedItems !is null && kind == JsonKind.array)
+    {
+        bool failed;
+        const len = A.arrayLength(v);
+        foreach (i; 0 .. len)
+        {
+            if (ev.hasItem(i))
+                continue;
+            const elem = A.arrayAt(v, i);
+            Evaluated se;
+            if (evalChild!A(s.unevaluatedItems, elem, loc(st, ip, "/" ~ i.to!string),
+                    loc(st, kp, "/unevaluatedItems"), st, se))
+                ev.markItem(i);
+            else
+                failed = true;
+        }
+        if (failed)
+        {
+            fail(st, ip, loc(st, kp, "/unevaluatedItems"), "unevaluated items do not validate");
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
+/// Evaluate a child schema. A `isSimpleScalar` node cannot recurse, so it skips
+/// `evalSchema`'s depth guard, dynamic-scope stack, and reference/applicator
+/// cascade — the per-node frame setup that dominates leaf-heavy instances —
+/// and validates inline. Everything else goes through the full evaluator.
+private bool evalChild(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
+{
+    if (s.isSimpleScalar)
+        return evalSimple!A(s, v, ip, kp, st);
+    return evalSchema!A(s, v, ip, kp, st, ev);
+}
+
+/// Fast path for `isSimpleScalar` schemas: only `type`/`const`/`enum` plus the
+/// numeric and string bound keywords can apply, so there is no recursion,
+/// annotation collection, or dynamic scope to manage.
+private bool evalSimple(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st)
+{
+    const kind = A.kindOf(v);
+    bool ok = true;
+    if (s.hasType && !typeMatches!A(s.typeMask, v, kind))
+    {
+        fail(st, ip, loc(st, kp, "/type"), "instance type does not match");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (s.hasConst && !valueEqualsNode!A(v, s.constValue, kind))
+    {
+        fail(st, ip, loc(st, kp, "/const"), "instance does not equal the const value");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (s.hasEnum && !enumContains!A(v, kind, s.enumValues))
+    {
+        fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (kind == JsonKind.integer || kind == JsonKind.floating)
+        ok &= checkNumber!A(s, A.getNumber(v), ip, kp, st);
+    else if (kind == JsonKind.string_)
+        ok &= checkString!A(s, A.getString(v), ip, kp, st);
+    return ok;
+}
+
+// The in-place applicators (`allOf`/`anyOf`/`oneOf`/`not`/`if`) each need their
+// own `Evaluated` collector. Kept out of `evalSchema` and not inlined so that
+// `evalSchema`'s stack frame — set up and torn down on every node of the
+// recursion — stays small; this cold-ish branch carries the heavy locals.
+pragma(inline, false)
+private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
+{
+    bool ok = true;
     foreach (i, sub; s.allOf)
     {
         Evaluated se;
@@ -352,6 +484,10 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 any = true;
                 ev.merge(se);
+                // Validity needs only one match; remaining branches matter only
+                // to collect annotations for a `unevaluated*` keyword in scope.
+                if (!st.tracksAnnotations)
+                    break;
             }
         }
         if (any)
@@ -373,6 +509,10 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 matches++;
                 ev.merge(se);
+                // Two matches already violate oneOf; stop unless errors are
+                // being collected for a report.
+                if (matches > 1 && !st.collect)
+                    break;
             }
         }
         if (matches == 1)
@@ -426,68 +566,6 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
                 ok = false;
         }
     }
-
-    if (!st.collect && !ok)
-        return false;
-
-    // --- objects ---
-    if (kind == JsonKind.object)
-        ok &= checkObject!A(s, v, ip, kp, st, ev);
-
-    if (!st.collect && !ok)
-        return false;
-
-    // --- arrays ---
-    if (kind == JsonKind.array)
-        ok &= checkArray!A(s, v, ip, kp, st, ev);
-
-    if (!st.collect && !ok)
-        return false;
-
-    // --- unevaluated*, after everything else at this location ---
-    if (s.unevaluatedProperties !is null && kind == JsonKind.object)
-    {
-        bool failed;
-        A.objectEach(v, (string key, in A.Value member) {
-            if (ev.hasProp(key))
-                return 0;
-            Evaluated se;
-            if (evalSchema!A(s.unevaluatedProperties, member,
-                loc(st, ip, "/" ~ escapeToken(key)), loc(st, kp, "/unevaluatedProperties"), st, se))
-                ev.markProp(key);
-            else
-                failed = true;
-            return 0;
-        });
-        if (failed)
-        {
-            fail(st, ip, loc(st, kp, "/unevaluatedProperties"), "unevaluated properties do not validate");
-            ok = false;
-        }
-    }
-    if (s.unevaluatedItems !is null && kind == JsonKind.array)
-    {
-        bool failed;
-        const len = A.arrayLength(v);
-        foreach (i; 0 .. len)
-        {
-            if (ev.hasItem(i))
-                continue;
-            const elem = A.arrayAt(v, i);
-            Evaluated se;
-            if (evalSchema!A(s.unevaluatedItems, elem, loc(st, ip, "/" ~ i.to!string),
-                    loc(st, kp, "/unevaluatedItems"), st, se))
-                ev.markItem(i);
-            else
-                failed = true;
-        }
-        if (failed)
-        {
-            fail(st, ip, loc(st, kp, "/unevaluatedItems"), "unevaluated items do not validate");
-            ok = false;
-        }
-    }
-
     return ok;
 }
 
@@ -672,7 +750,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
                 if (p.required)
                     seenRequired++;
                 Evaluated se;
-                if (evalSchema!A(p.schema, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
+                if (evalChild!A(p.schema, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
                     ev.markProp(key);
                 else
                     failed = true;
@@ -682,7 +760,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
                 if (!matchFirst(key, pp.regex).empty)
                 {
                     Evaluated se;
-                    if (evalSchema!A(pp.schema, member, mp,
+                    if (evalChild!A(pp.schema, member, mp,
                         loc(st, kp, "/patternProperties/" ~ escapeToken(pp.source)), st, se))
                         ev.markProp(key);
                     else
@@ -692,7 +770,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             if (!matched && s.additionalProperties !is null)
             {
                 Evaluated se;
-                if (evalSchema!A(s.additionalProperties, member, mp,
+                if (evalChild!A(s.additionalProperties, member, mp,
                     loc(st, kp, "/additionalProperties"), st, se))
                     ev.markProp(key);
                 else
@@ -702,7 +780,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 const nameValue = A.ofString(key);
                 Evaluated se;
-                if (!evalSchema!A(s.propertyNames, nameValue, mp, loc(st, kp, "/propertyNames"), st, se))
+                if (!evalChild!A(s.propertyNames, nameValue, mp, loc(st, kp, "/propertyNames"), st, se))
                     failed = true;
             }
             // Flag mode: stop visiting members once one has failed.
@@ -784,7 +862,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.prefixItems[i], elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.prefixItems[i], elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/prefixItems/" ~ i.to!string), st, se))
                 ev.markItem(i);
             else
@@ -805,7 +883,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.itemsSchema, elem, loc(st, ip, "/" ~ i.to!string), loc(st, kp, "/items"), st, se))
+            if (evalChild!A(s.itemsSchema, elem, loc(st, ip, "/" ~ i.to!string), loc(st, kp, "/items"), st, se))
                 ev.markItem(i);
             else
             {
@@ -826,7 +904,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.additionalItemsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.additionalItemsSchema, elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/additionalItems"), st, se))
                 ev.markItem(i);
             else
@@ -847,7 +925,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.containsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.containsSchema, elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/contains"), st, se))
                 matchedIdx ~= i;
         }
