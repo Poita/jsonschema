@@ -411,9 +411,19 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
 private bool evalChild(A)(const CompiledSchema s, in A.Value v, string ip,
         string kp, ref EvalState!A st, ref Evaluated ev)
 {
-    if (s.isSimpleScalar)
-        return evalSimple!A(s, v, ip, kp, st);
-    return evalSchema!A(s, v, ip, kp, st, ev);
+    import std.typecons : rebindable;
+
+    auto t = rebindable(s);
+    // Follow a chain of pure `$ref` nodes without a frame per hop. Restricted to
+    // flag mode (the keyword location is not built) and to schemas with no
+    // dynamic scope (no resource push to preserve); a small hop cap leaves any
+    // pathological static-ref cycle to the depth-guarded evaluator.
+    if (!st.collect && !st.tracksDynamicScope)
+        for (int hops = 0; t.isPureRef && hops < 16; hops++)
+            t = t.refInfo.target;
+    if (t.isSimpleScalar)
+        return evalSimple!A(t, v, ip, kp, st);
+    return evalSchema!A(t, v, ip, kp, st, ev);
 }
 
 /// Fast path for `isSimpleScalar` schemas: only `type`/`const`/`enum` plus the

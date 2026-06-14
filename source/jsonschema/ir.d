@@ -342,6 +342,10 @@ final class CompiledSchema
     /// validates it through a tiny fast path that skips the depth guard, the
     /// dynamic-scope stack, and the reference/applicator cascade.
     bool isSimpleScalar;
+    /// True when this schema is nothing but a static `$ref` (no sibling
+    /// keywords, not draft-07-exclusive, not dynamic). The evaluator can follow
+    /// the reference to its target without spending a stack frame on this node.
+    bool isPureRef;
 
     // --- applicators: children ---
     PropEntry[string] properties;

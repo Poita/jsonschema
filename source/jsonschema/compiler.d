@@ -386,6 +386,25 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
         && s.unevaluatedProperties is null && s.unevaluatedItems is null
         && s.contentSchema is null;
 
+    // A node that carries a static `$ref` and nothing else (the `isSimpleScalar`
+    // emptiness, but with a reference): the evaluator can follow it framelessly.
+    s.isPureRef = s.refInfo !is null && !s.refIsExclusive && s.dynRefInfo is null
+        && !s.hasType && !s.hasEnum && !s.hasConst && !s.hasInPlaceApplicators
+        && !s.hasMultipleOf && !s.hasMaximum && !s.hasExclusiveMaximum
+        && !s.hasMinimum && !s.hasExclusiveMinimum
+        && s.maxLength == absent && s.minLength == absent && !s.hasPattern
+        && s.properties.length == 0 && s.patternProperties.length == 0
+        && s.additionalProperties is null && s.propertyNames is null
+        && s.required.length == 0 && s.dependentRequired.length == 0
+        && s.dependentSchemas.length == 0
+        && s.maxProperties == absent && s.minProperties == absent
+        && !s.hasPrefixItems && s.itemsSchema is null
+        && s.additionalItemsSchema is null && s.containsSchema is null
+        && s.maxItems == absent && s.minItems == absent && !s.uniqueItems
+        && s.maxContains == absent && s.minContains == absent
+        && s.unevaluatedProperties is null && s.unevaluatedItems is null
+        && !s.hasFormat && s.contentSchema is null;
+
     // Partition `required` against `properties`: a name that is also a property
     // gets its `PropEntry.required` bit set (so the property scan counts it),
     // the rest go to `requiredExtra` for an explicit instance lookup.
