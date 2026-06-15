@@ -744,12 +744,37 @@ private bool checkString(A)(const CompiledSchema s, string str, string ip,
     return ok;
 }
 
-/// Binary search for `key` in the sorted `propKeys`, returning its `PropEntry`
-/// (or null). Inlined byte comparison, so no out-of-line druntime call — unlike
-/// an `in` on the `properties` associative array.
+/// Find `key` among the flattened `properties`, returning its `PropEntry` (or
+/// null). Avoids the out-of-line druntime call of an `in` on the associative
+/// array. For small property sets a linear scan over the contiguous key array
+/// (predictable branches, prefetch-friendly, early-exit string compare) beats a
+/// binary search's midpoint branching; large sets fall back to binary search
+/// over the sorted keys. (The jsonschema Rust crate uses the same split, with a
+/// linear-scan Vec below N=40 and a hash map above.)
+enum size_t linearScanMax = 40;
+
 private const(PropEntry)* findProp(const string[] keys, const PropEntry[] vals, string key)
         @trusted @nogc nothrow pure
 {
+    if (keys.length <= linearScanMax)
+    {
+        foreach (i; 0 .. keys.length)
+        {
+            const k = keys[i];
+            if (k.length != key.length)
+                continue;
+            bool eq = true;
+            foreach (j; 0 .. key.length)
+                if (k[j] != key[j])
+                {
+                    eq = false;
+                    break;
+                }
+            if (eq)
+                return &vals[i];
+        }
+        return null;
+    }
     size_t lo = 0, hi = keys.length;
     while (lo < hi)
     {
