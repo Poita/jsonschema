@@ -778,6 +778,64 @@ private const(PropEntry)* findProp(const string[] keys, const PropEntry[] vals, 
     return null;
 }
 
+/// Inline validation of a scalar-shaped property (see `PropShape`), reading
+/// packed bounds from the property entry rather than dispatching through the
+/// general evaluator and chasing into the `CompiledSchema` class. Used by the
+/// `checkObject` member loop in flag mode; `general`-shaped properties and
+/// collect mode (which needs per-keyword error messages) take the full path.
+private bool scalarOk(A)(ref const PropEntry p, in A.Value m)
+{
+    const kind = A.kindOf(m);
+    final switch (p.shape)
+    {
+    case PropShape.general:
+        return true; // never reached: callers gate on shape != general
+    case PropShape.boolean_:
+        return kind == JsonKind.boolean;
+    case PropShape.string_:
+        if (kind != JsonKind.string_)
+            return false;
+        if (p.lenMin == absent && p.lenMax == absent)
+            return true;
+        // Bound by byte length (codePoints in [blen/4, blen]); only count when
+        // the byte length leaves the verdict undecided.
+        const sv = A.getString(m);
+        const blen = sv.length;
+        long cp = -1;
+        if (p.lenMax != absent && blen > cast(size_t) p.lenMax)
+        {
+            cp = countCodePoints(sv);
+            if (cp > p.lenMax)
+                return false;
+        }
+        if (p.lenMin != absent)
+        {
+            if (blen < cast(size_t) p.lenMin)
+                return false;
+            if ((blen + 3) / 4 < cast(size_t) p.lenMin)
+            {
+                if (cp < 0)
+                    cp = countCodePoints(sv);
+                if (cp < p.lenMin)
+                    return false;
+            }
+        }
+        return true;
+    case PropShape.numeric_:
+        if (!typeMatches!A(p.typeMask, m, kind))
+            return false;
+        if (kind == JsonKind.integer || kind == JsonKind.floating)
+        {
+            const n = A.getNumber(m);
+            if (p.hasLo && cmpNumbers(n, p.lo) < 0)
+                return false;
+            if (p.hasHi && cmpNumbers(n, p.hi) > 0)
+                return false;
+        }
+        return true;
+    }
+}
+
 private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         string kp, ref EvalState!A st, ref Evaluated ev)
 {
@@ -837,11 +895,25 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 if (p.required)
                     seenRequired++;
-                Evaluated se;
-                if (evalChild!A(p.schema, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
-                    ev.markProp(key);
+                // Inline scalar fast path (flag mode): validate common scalar
+                // properties without the general dispatch. Collect mode and
+                // `general`-shaped properties take the full path for messages.
+                if (!st.collect && p.shape != PropShape.general)
+                {
+                    if (scalarOk!A(*p, member))
+                        ev.markProp(key);
+                    else
+                        failed = true;
+                }
                 else
-                    failed = true;
+                {
+                    Evaluated se;
+                    if (evalChild!A(p.schema, member, mp,
+                            loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
+                        ev.markProp(key);
+                    else
+                        failed = true;
+                }
                 matched = true;
             }
             foreach (ref pp; s.patternProperties)

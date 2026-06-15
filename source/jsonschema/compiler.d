@@ -431,9 +431,46 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
         sort(s.propKeys);
         s.propVals.length = s.propKeys.length;
         foreach (i, k; s.propKeys)
+        {
             s.propVals[i] = s.properties[k];
+            classifyPropShape(s.propVals[i]);
+        }
     }
     return s;
+}
+
+/// Classify a property's subschema into a `PropShape` and pack the parameters
+/// its inline check needs. Conservative: anything carrying a keyword the scalar
+/// shapes don't model stays `general`, so semantics are unchanged.
+private void classifyPropShape(ref PropEntry e) pure nothrow
+{
+    auto cs = e.schema;
+    // Must be a pure scalar node: no applicators/refs/format/object/array
+    // keywords (isSimpleScalar), and none of the scalar extras the shapes omit.
+    if (!cs.isSimpleScalar || !cs.hasType || cs.hasConst || cs.hasEnum
+            || cs.hasPattern || cs.hasMultipleOf
+            || cs.hasExclusiveMaximum || cs.hasExclusiveMinimum)
+        return;
+
+    const m = cs.typeMask;
+    if (m == TypeBit.boolean)
+        e.shape = PropShape.boolean_;
+    else if (m == TypeBit.string_)
+    {
+        e.shape = PropShape.string_;
+        e.lenMin = cs.minLength;
+        e.lenMax = cs.maxLength;
+    }
+    else if (m != 0 && (m & ~cast(int)(TypeBit.integer | TypeBit.number)) == 0)
+    {
+        // Only integer and/or number bits set: a pure numeric type.
+        e.shape = PropShape.numeric_;
+        e.typeMask = m;
+        e.hasLo = cs.hasMinimum;
+        e.lo = cs.minimum;
+        e.hasHi = cs.hasMaximum;
+        e.hi = cs.maximum;
+    }
 }
 
 private SchemaResource newResource(Session sess, string uri, string dialect,

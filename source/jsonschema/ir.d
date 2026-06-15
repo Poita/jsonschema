@@ -230,14 +230,37 @@ struct PatternProperty
     CompiledSchema schema;
 }
 
-/// `properties` entry: the subschema plus whether the property name also
-/// appears in `required`. The `required` bit lets `checkObject` confirm that a
-/// required property is present during its single pass over the instance's
-/// members, instead of a second hashing lookup per required name.
+/// Common scalar shape of a property's subschema, classified at compile time so
+/// the hot `checkObject` member loop can validate it inline — reading packed
+/// bounds from the (cache-warm, contiguous) property array — instead of routing
+/// through `evalChild`/`evalSchema` and chasing into the `CompiledSchema` class.
+/// `general` covers everything not reducible to one of the scalar shapes.
+enum PropShape : ubyte
+{
+    general,
+    boolean_, /// `type: boolean`, no other constraints
+    string_, /// `type: string`, optional min/maxLength only
+    numeric_ /// `type: integer`/`number` (only), optional inclusive min/maximum
+}
+
+/// `properties` entry: the subschema, whether the property name also appears in
+/// `required`, and a precomputed scalar shape with packed parameters. The
+/// `required` bit lets `checkObject` confirm a required property is present
+/// during its single member pass rather than a second hashing lookup per name.
+/// The `shape` (plus packed bounds) lets it validate common scalar properties
+/// inline without dispatching through the general evaluator.
 struct PropEntry
 {
     CompiledSchema schema;
     bool required;
+    PropShape shape = PropShape.general;
+    // numeric_: the `type` mask (for typeMatches) and inclusive bounds.
+    ubyte typeMask;
+    bool hasLo, hasHi;
+    JsonNumber lo, hi;
+    // string_: code-point length bounds (`absent` when unset).
+    long lenMin = absent;
+    long lenMax = absent;
 }
 
 /// Bit flags for the `type` keyword.
