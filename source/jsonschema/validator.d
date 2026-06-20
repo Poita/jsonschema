@@ -33,6 +33,7 @@ final class Validator
     /// `unevaluatedItems` anywhere. When false, the evaluator skips all
     /// `Evaluated` annotation bookkeeping since nothing consults it.
     package bool usesUnevaluated;
+    package bool usesDynamicScope;
 
     package this(CompiledSchema root, ValidatorSettings settings) pure nothrow
     {
@@ -89,6 +90,7 @@ final class Validator
         st.maxDepth = settings.maxDepth;
         st.assertFormats = settings.formatMode == FormatMode.assertion;
         st.tracksAnnotations = usesUnevaluated;
+        st.tracksDynamicScope = usesDynamicScope;
         Evaluated ev;
         const ok = evalSchema!A(root, instance, "", "", st, ev);
         return ValidationResult(ok, st.errors);
@@ -125,6 +127,7 @@ private struct EvalState(A)
     bool assertFormats;
     bool depthExceeded;
     bool tracksAnnotations;
+    bool tracksDynamicScope;
     size_t depth;
     size_t maxDepth;
 }
@@ -239,14 +242,15 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
     }
 
     bool pushed;
-    if (s.resource !is null && (st.dynStack.length == 0 || st.dynStack[$ - 1]!is s.resource))
+    if (st.tracksDynamicScope && s.resource !is null
+            && (st.dynStack.length == 0 || st.dynStack[$ - 1]!is s.resource))
     {
         st.dynStack ~= s.resource;
         pushed = true;
     }
     scope (exit)
         if (pushed)
-            st.dynStack.length--;
+            st.dynStack = st.dynStack[0 .. $ - 1];
 
     bool ok = true;
     const kind = A.kindOf(v);
@@ -305,20 +309,10 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         fail(st, ip, loc(st, kp, "/const"), "instance does not equal the const value");
         ok = false;
     }
-    if (s.hasEnum)
+    if (s.hasEnum && !enumContains!A(v, kind, s.enumValues))
     {
-        bool found;
-        foreach (ref e; s.enumValues)
-            if (valueEqualsNode!A(v, e, kind))
-            {
-                found = true;
-                break;
-            }
-        if (!found)
-        {
-            fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
-            ok = false;
-        }
+        fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
+        ok = false;
     }
 
     // --- validation: numbers ---
@@ -339,102 +333,11 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         return false;
 
     // --- in-place applicators ---
-    foreach (i, sub; s.allOf)
+    if (s.hasInPlaceApplicators && !evalInPlace!A(s, v, ip, kp, st, ev))
     {
-        Evaluated se;
-        if (evalSchema!A(sub, v, ip, loc(st, kp, "/allOf/" ~ i.to!string), st, se))
-            ev.merge(se);
-        else
-        {
-            ok = false;
-            if (!st.collect)
-                return false;
-        }
-    }
-    if (s.anyOf.length)
-    {
-        const mark = st.errors.length;
-        bool any;
-        foreach (i, sub; s.anyOf)
-        {
-            Evaluated se;
-            if (evalSchema!A(sub, v, ip, loc(st, kp, "/anyOf/" ~ i.to!string), st, se))
-            {
-                any = true;
-                ev.merge(se);
-            }
-        }
-        if (any)
-            shrinkErrors(st, mark);
-        else
-        {
-            fail(st, ip, loc(st, kp, "/anyOf"), "instance does not match any anyOf branch");
-            ok = false;
-        }
-    }
-    if (s.oneOf.length)
-    {
-        const mark = st.errors.length;
-        size_t matches;
-        foreach (i, sub; s.oneOf)
-        {
-            Evaluated se;
-            if (evalSchema!A(sub, v, ip, loc(st, kp, "/oneOf/" ~ i.to!string), st, se))
-            {
-                matches++;
-                ev.merge(se);
-            }
-        }
-        if (matches == 1)
-            shrinkErrors(st, mark);
-        else
-        {
-            if (matches > 1)
-                shrinkErrors(st, mark);
-            fail(st, ip, loc(st, kp, "/oneOf"), matches == 0
-                    ? "instance does not match any oneOf branch"
-                    : "instance matches more than one oneOf branch");
-            ok = false;
-        }
-    }
-    if (s.notSchema !is null)
-    {
-        const mark = st.errors.length;
-        Evaluated se; // annotations inside "not" are never retained
-        const r = evalSchema!A(s.notSchema, v, ip, loc(st, kp, "/not"), st, se);
-        shrinkErrors(st, mark);
-        if (r)
-        {
-            fail(st, ip, loc(st, kp, "/not"), "instance must not match the 'not' schema");
-            ok = false;
-        }
-    }
-    if (s.ifSchema !is null)
-    {
-        const mark = st.errors.length;
-        Evaluated condEv;
-        const condOk = evalSchema!A(s.ifSchema, v, ip, loc(st, kp, "/if"), st, condEv);
-        shrinkErrors(st, mark); // "if" outcomes are not failures
-        if (condOk)
-        {
-            ev.merge(condEv);
-            if (s.thenSchema !is null)
-            {
-                Evaluated se;
-                if (evalSchema!A(s.thenSchema, v, ip, loc(st, kp, "/then"), st, se))
-                    ev.merge(se);
-                else
-                    ok = false;
-            }
-        }
-        else if (s.elseSchema !is null)
-        {
-            Evaluated se;
-            if (evalSchema!A(s.elseSchema, v, ip, loc(st, kp, "/else"), st, se))
-                ev.merge(se);
-            else
-                ok = false;
-        }
+        ok = false;
+        if (!st.collect)
+            return false;
     }
 
     if (!st.collect && !ok)
@@ -462,7 +365,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
             if (ev.hasProp(key))
                 return 0;
             Evaluated se;
-            if (evalSchema!A(s.unevaluatedProperties, member,
+            if (evalChild!A(s.unevaluatedProperties, member,
                 loc(st, ip, "/" ~ escapeToken(key)), loc(st, kp, "/unevaluatedProperties"), st, se))
                 ev.markProp(key);
             else
@@ -485,7 +388,7 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
                 continue;
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.unevaluatedItems, elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.unevaluatedItems, elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/unevaluatedItems"), st, se))
                 ev.markItem(i);
             else
@@ -498,6 +401,181 @@ package bool evalSchema(A)(const CompiledSchema s, in A.Value v, string ip,
         }
     }
 
+    return ok;
+}
+
+/// Evaluate a child schema. A `isSimpleScalar` node cannot recurse, so it skips
+/// `evalSchema`'s depth guard, dynamic-scope stack, and reference/applicator
+/// cascade — the per-node frame setup that dominates leaf-heavy instances —
+/// and validates inline. Everything else goes through the full evaluator.
+private bool evalChild(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
+{
+    import std.typecons : rebindable;
+
+    auto t = rebindable(s);
+    // Follow a chain of pure `$ref` nodes without a frame per hop. Restricted to
+    // flag mode (the keyword location is not built) and to schemas with no
+    // dynamic scope (no resource push to preserve); a small hop cap leaves any
+    // pathological static-ref cycle to the depth-guarded evaluator.
+    if (!st.collect && !st.tracksDynamicScope)
+        for (int hops = 0; t.isPureRef && hops < 16; hops++)
+            t = t.refInfo.target;
+    if (t.isSimpleScalar)
+        return evalSimple!A(t, v, ip, kp, st);
+    return evalSchema!A(t, v, ip, kp, st, ev);
+}
+
+/// Fast path for `isSimpleScalar` schemas: only `type`/`const`/`enum` plus the
+/// numeric and string bound keywords can apply, so there is no recursion,
+/// annotation collection, or dynamic scope to manage.
+private bool evalSimple(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st)
+{
+    const kind = A.kindOf(v);
+    bool ok = true;
+    if (s.hasType && !typeMatches!A(s.typeMask, v, kind))
+    {
+        fail(st, ip, loc(st, kp, "/type"), "instance type does not match");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (s.hasConst && !valueEqualsNode!A(v, s.constValue, kind))
+    {
+        fail(st, ip, loc(st, kp, "/const"), "instance does not equal the const value");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (s.hasEnum && !enumContains!A(v, kind, s.enumValues))
+    {
+        fail(st, ip, loc(st, kp, "/enum"), "instance is not one of the enum values");
+        ok = false;
+        if (!st.collect)
+            return false;
+    }
+    if (kind == JsonKind.integer || kind == JsonKind.floating)
+        ok &= checkNumber!A(s, A.getNumber(v), ip, kp, st);
+    else if (kind == JsonKind.string_)
+        ok &= checkString!A(s, A.getString(v), ip, kp, st);
+    return ok;
+}
+
+// The in-place applicators (`allOf`/`anyOf`/`oneOf`/`not`/`if`) each need their
+// own `Evaluated` collector. Kept out of `evalSchema` and not inlined so that
+// `evalSchema`'s stack frame — set up and torn down on every node of the
+// recursion — stays small; this cold-ish branch carries the heavy locals.
+pragma(inline, false)
+private bool evalInPlace(A)(const CompiledSchema s, in A.Value v, string ip,
+        string kp, ref EvalState!A st, ref Evaluated ev)
+{
+    bool ok = true;
+    foreach (i, sub; s.allOf)
+    {
+        Evaluated se;
+        if (evalChild!A(sub, v, ip, loc(st, kp, "/allOf/" ~ i.to!string), st, se))
+            ev.merge(se);
+        else
+        {
+            ok = false;
+            if (!st.collect)
+                return false;
+        }
+    }
+    if (s.anyOf.length)
+    {
+        const mark = st.errors.length;
+        bool any;
+        foreach (i, sub; s.anyOf)
+        {
+            Evaluated se;
+            if (evalChild!A(sub, v, ip, loc(st, kp, "/anyOf/" ~ i.to!string), st, se))
+            {
+                any = true;
+                ev.merge(se);
+                // Validity needs only one match; remaining branches matter only
+                // to collect annotations for a `unevaluated*` keyword in scope.
+                if (!st.tracksAnnotations)
+                    break;
+            }
+        }
+        if (any)
+            shrinkErrors(st, mark);
+        else
+        {
+            fail(st, ip, loc(st, kp, "/anyOf"), "instance does not match any anyOf branch");
+            ok = false;
+        }
+    }
+    if (s.oneOf.length)
+    {
+        const mark = st.errors.length;
+        size_t matches;
+        foreach (i, sub; s.oneOf)
+        {
+            Evaluated se;
+            if (evalChild!A(sub, v, ip, loc(st, kp, "/oneOf/" ~ i.to!string), st, se))
+            {
+                matches++;
+                ev.merge(se);
+                // Two matches already violate oneOf; stop unless errors are
+                // being collected for a report.
+                if (matches > 1 && !st.collect)
+                    break;
+            }
+        }
+        if (matches == 1)
+            shrinkErrors(st, mark);
+        else
+        {
+            if (matches > 1)
+                shrinkErrors(st, mark);
+            fail(st, ip, loc(st, kp, "/oneOf"), matches == 0
+                    ? "instance does not match any oneOf branch"
+                    : "instance matches more than one oneOf branch");
+            ok = false;
+        }
+    }
+    if (s.notSchema !is null)
+    {
+        const mark = st.errors.length;
+        Evaluated se; // annotations inside "not" are never retained
+        const r = evalChild!A(s.notSchema, v, ip, loc(st, kp, "/not"), st, se);
+        shrinkErrors(st, mark);
+        if (r)
+        {
+            fail(st, ip, loc(st, kp, "/not"), "instance must not match the 'not' schema");
+            ok = false;
+        }
+    }
+    if (s.ifSchema !is null)
+    {
+        const mark = st.errors.length;
+        Evaluated condEv;
+        const condOk = evalChild!A(s.ifSchema, v, ip, loc(st, kp, "/if"), st, condEv);
+        shrinkErrors(st, mark); // "if" outcomes are not failures
+        if (condOk)
+        {
+            ev.merge(condEv);
+            if (s.thenSchema !is null)
+            {
+                Evaluated se;
+                if (evalChild!A(s.thenSchema, v, ip, loc(st, kp, "/then"), st, se))
+                    ev.merge(se);
+                else
+                    ok = false;
+            }
+        }
+        else if (s.elseSchema !is null)
+        {
+            Evaluated se;
+            if (evalChild!A(s.elseSchema, v, ip, loc(st, kp, "/else"), st, se))
+                ev.merge(se);
+            else
+                ok = false;
+        }
+    }
     return ok;
 }
 
@@ -585,41 +663,202 @@ private bool checkNumber(A)(const CompiledSchema s, in JsonNumber n, string ip,
     return ok;
 }
 
+/// Number of Unicode code points in valid UTF-8: every byte that is not a
+/// continuation byte (`10xxxxxx`) starts one code point. Cheaper than
+/// `std.utf.count`, which fully decodes (and validates) each code point.
+private size_t countCodePoints(string s) @trusted @nogc nothrow pure
+{
+    size_t n;
+    foreach (immutable ubyte b; cast(const(ubyte)[]) s)
+        if ((b & 0xC0) != 0x80)
+            n++;
+    return n;
+}
+
 private bool checkString(A)(const CompiledSchema s, string str, string ip,
         string kp, ref EvalState!A st)
 {
     bool ok = true;
     if (s.maxLength != absent || s.minLength != absent)
     {
-        import std.utf : count;
-
-        const len = () @trusted { return str.count; }();
-        if (s.maxLength != absent && len > s.maxLength)
+        // `minLength`/`maxLength` count Unicode code points, but code points are
+        // bounded by byte length: blen/4 <= codePoints <= blen. Those bounds
+        // resolve most cases from the O(1) byte length alone; only when they are
+        // inconclusive do we count code points (cheaply, without decoding).
+        const blen = str.length;
+        long cp = -1;
+        if (s.maxLength != absent)
         {
-            fail(st, ip, loc(st, kp, "/maxLength"), "string is longer than maxLength");
-            ok = false;
-            if (!st.collect)
-                return false;
+            if (blen > cast(size_t) s.maxLength)
+            {
+                cp = countCodePoints(str);
+                if (cp > s.maxLength)
+                {
+                    fail(st, ip, loc(st, kp, "/maxLength"), "string is longer than maxLength");
+                    ok = false;
+                    if (!st.collect)
+                        return false;
+                }
+            }
         }
-        if (s.minLength != absent && len < s.minLength)
+        if (s.minLength != absent)
         {
-            fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
-            ok = false;
-            if (!st.collect)
-                return false;
+            if (blen < cast(size_t) s.minLength)
+            {
+                fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
+                ok = false;
+                if (!st.collect)
+                    return false;
+            }
+            else if ((blen + 3) / 4 < cast(size_t) s.minLength)
+            {
+                if (cp < 0)
+                    cp = countCodePoints(str);
+                if (cp < s.minLength)
+                {
+                    fail(st, ip, loc(st, kp, "/minLength"), "string is shorter than minLength");
+                    ok = false;
+                    if (!st.collect)
+                        return false;
+                }
+            }
         }
     }
     if (s.hasPattern)
     {
-        import std.regex : matchFirst;
+        bool matched;
+        if (s.fastPattern.compiled)
+            matched = s.fastPattern.matches(str);
+        else
+        {
+            import std.regex : matchFirst;
 
-        if (matchFirst(str, s.pattern).empty)
+            matched = !matchFirst(str, s.pattern).empty;
+        }
+        if (!matched)
         {
             fail(st, ip, loc(st, kp, "/pattern"), "string does not match pattern '" ~ s.patternSource ~ "'");
             ok = false;
         }
     }
     return ok;
+}
+
+/// Find `key` among the flattened `properties`, returning its `PropEntry` (or
+/// null). Avoids the out-of-line druntime call of an `in` on the associative
+/// array. For small property sets a linear scan over the contiguous key array
+/// (predictable branches, prefetch-friendly, early-exit string compare) beats a
+/// binary search's midpoint branching; large sets fall back to binary search
+/// over the sorted keys. (The jsonschema Rust crate uses the same split, with a
+/// linear-scan Vec below N=40 and a hash map above.)
+enum size_t linearScanMax = 40;
+
+private const(PropEntry)* findProp(const string[] keys, const PropEntry[] vals, string key)
+        @trusted @nogc nothrow pure
+{
+    if (keys.length <= linearScanMax)
+    {
+        foreach (i; 0 .. keys.length)
+        {
+            const k = keys[i];
+            if (k.length != key.length)
+                continue;
+            bool eq = true;
+            foreach (j; 0 .. key.length)
+                if (k[j] != key[j])
+                {
+                    eq = false;
+                    break;
+                }
+            if (eq)
+                return &vals[i];
+        }
+        return null;
+    }
+    size_t lo = 0, hi = keys.length;
+    while (lo < hi)
+    {
+        const mid = (lo + hi) >> 1;
+        const k = keys[mid];
+        // Lexicographic compare, shortest-first on a shared prefix.
+        const n = key.length < k.length ? key.length : k.length;
+        int c = 0;
+        foreach (i; 0 .. n)
+            if (key[i] != k[i])
+            {
+                c = cast(ubyte) key[i] < cast(ubyte) k[i] ? -1 : 1;
+                break;
+            }
+        if (c == 0)
+        {
+            if (key.length == k.length)
+                return &vals[mid];
+            c = key.length < k.length ? -1 : 1;
+        }
+        if (c < 0)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    return null;
+}
+
+/// Inline validation of a scalar-shaped property (see `PropShape`), reading
+/// packed bounds from the property entry rather than dispatching through the
+/// general evaluator and chasing into the `CompiledSchema` class. Used by the
+/// `checkObject` member loop in flag mode; `general`-shaped properties and
+/// collect mode (which needs per-keyword error messages) take the full path.
+private bool scalarOk(A)(ref const PropEntry p, in A.Value m)
+{
+    const kind = A.kindOf(m);
+    final switch (p.shape)
+    {
+    case PropShape.general:
+        return true; // never reached: callers gate on shape != general
+    case PropShape.boolean_:
+        return kind == JsonKind.boolean;
+    case PropShape.string_:
+        if (kind != JsonKind.string_)
+            return false;
+        if (p.lenMin == absent && p.lenMax == absent)
+            return true;
+        // Bound by byte length (codePoints in [blen/4, blen]); only count when
+        // the byte length leaves the verdict undecided.
+        const sv = A.getString(m);
+        const blen = sv.length;
+        long cp = -1;
+        if (p.lenMax != absent && blen > cast(size_t) p.lenMax)
+        {
+            cp = countCodePoints(sv);
+            if (cp > p.lenMax)
+                return false;
+        }
+        if (p.lenMin != absent)
+        {
+            if (blen < cast(size_t) p.lenMin)
+                return false;
+            if ((blen + 3) / 4 < cast(size_t) p.lenMin)
+            {
+                if (cp < 0)
+                    cp = countCodePoints(sv);
+                if (cp < p.lenMin)
+                    return false;
+            }
+        }
+        return true;
+    case PropShape.numeric_:
+        if (!typeMatches!A(p.typeMask, m, kind))
+            return false;
+        if (kind == JsonKind.integer || kind == JsonKind.floating)
+        {
+            const n = A.getNumber(m);
+            if (p.hasLo && cmpNumbers(n, p.lo) < 0)
+                return false;
+            if (p.hasHi && cmpNumbers(n, p.hi) > 0)
+                return false;
+        }
+        return true;
+    }
 }
 
 private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
@@ -642,14 +881,6 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         if (!st.collect)
             return false;
     }
-    foreach (name; s.required)
-        if (A.objectGet(v, name) is null)
-        {
-            fail(st, ip, loc(st, kp, "/required"), "missing required property '" ~ name ~ "'");
-            ok = false;
-            if (!st.collect)
-                return false;
-        }
     foreach (trigger, names; s.dependentRequired)
         if (A.objectGet(v, trigger) !is null)
             foreach (name; names)
@@ -675,6 +906,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             }
         }
 
+    size_t seenRequired;
     if (s.properties.length || s.patternProperties.length
             || s.additionalProperties !is null || s.propertyNames !is null)
     {
@@ -684,20 +916,36 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         A.objectEach(v, (string key, in A.Value member) {
             const mp = loc(st, ip, "/" ~ escapeToken(key));
             bool matched;
-            if (auto p = key in s.properties)
+            if (auto p = findProp(s.propKeys, s.propVals, key))
             {
-                Evaluated se;
-                if (evalSchema!A(*p, member, mp, loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
-                    ev.markProp(key);
+                if (p.required)
+                    seenRequired++;
+                // Inline scalar fast path (flag mode): validate common scalar
+                // properties without the general dispatch. Collect mode and
+                // `general`-shaped properties take the full path for messages.
+                if (!st.collect && p.shape != PropShape.general)
+                {
+                    if (scalarOk!A(*p, member))
+                        ev.markProp(key);
+                    else
+                        failed = true;
+                }
                 else
-                    failed = true;
+                {
+                    Evaluated se;
+                    if (evalChild!A(p.schema, member, mp,
+                            loc(st, kp, "/properties/" ~ escapeToken(key)), st, se))
+                        ev.markProp(key);
+                    else
+                        failed = true;
+                }
                 matched = true;
             }
             foreach (ref pp; s.patternProperties)
                 if (!matchFirst(key, pp.regex).empty)
                 {
                     Evaluated se;
-                    if (evalSchema!A(pp.schema, member, mp,
+                    if (evalChild!A(pp.schema, member, mp,
                         loc(st, kp, "/patternProperties/" ~ escapeToken(pp.source)), st, se))
                         ev.markProp(key);
                     else
@@ -707,7 +955,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             if (!matched && s.additionalProperties !is null)
             {
                 Evaluated se;
-                if (evalSchema!A(s.additionalProperties, member, mp,
+                if (evalChild!A(s.additionalProperties, member, mp,
                     loc(st, kp, "/additionalProperties"), st, se))
                     ev.markProp(key);
                 else
@@ -717,7 +965,7 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
             {
                 const nameValue = A.ofString(key);
                 Evaluated se;
-                if (!evalSchema!A(s.propertyNames, nameValue, mp, loc(st, kp, "/propertyNames"), st, se))
+                if (!evalChild!A(s.propertyNames, nameValue, mp, loc(st, kp, "/propertyNames"), st, se))
                     failed = true;
             }
             // Flag mode: stop visiting members once one has failed.
@@ -725,6 +973,28 @@ private bool checkObject(A)(const CompiledSchema s, in A.Value v, string ip,
         });
         if (failed)
             ok = false;
+    }
+
+    // required. In collect mode, report each missing name precisely. In flag
+    // mode, the property scan above already counted the required properties it
+    // saw (`seenRequired`), so a shortfall means one is absent; names that are
+    // not properties (`requiredExtra`) still need an explicit lookup.
+    if (st.collect)
+    {
+        foreach (name; s.required)
+            if (A.objectGet(v, name) is null)
+            {
+                fail(st, ip, loc(st, kp, "/required"), "missing required property '" ~ name ~ "'");
+                ok = false;
+            }
+    }
+    else
+    {
+        if (!ok || seenRequired < s.requiredInProps)
+            return false;
+        foreach (name; s.requiredExtra)
+            if (A.objectGet(v, name) is null)
+                return false;
     }
     return ok;
 }
@@ -777,7 +1047,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.prefixItems[i], elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.prefixItems[i], elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/prefixItems/" ~ i.to!string), st, se))
                 ev.markItem(i);
             else
@@ -798,7 +1068,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.itemsSchema, elem, loc(st, ip, "/" ~ i.to!string), loc(st, kp, "/items"), st, se))
+            if (evalChild!A(s.itemsSchema, elem, loc(st, ip, "/" ~ i.to!string), loc(st, kp, "/items"), st, se))
                 ev.markItem(i);
             else
             {
@@ -819,7 +1089,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.additionalItemsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.additionalItemsSchema, elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/additionalItems"), st, se))
                 ev.markItem(i);
             else
@@ -840,7 +1110,7 @@ private bool checkArray(A)(const CompiledSchema s, in A.Value v, string ip,
         {
             const elem = A.arrayAt(v, i);
             Evaluated se;
-            if (evalSchema!A(s.containsSchema, elem, loc(st, ip, "/" ~ i.to!string),
+            if (evalChild!A(s.containsSchema, elem, loc(st, ip, "/" ~ i.to!string),
                     loc(st, kp, "/contains"), st, se))
                 matchedIdx ~= i;
         }
@@ -973,6 +1243,48 @@ private JsonNumber numberOfNode(in JsonNode n) pure nothrow
         return JsonNumber.ofULong(n.uinteger_);
     default:
         return JsonNumber.ofDouble(n.floating_);
+    }
+}
+
+/// Membership test for `enum`. Extracts the instance's scalar once and
+/// compares it against each candidate, rather than re-dispatching and
+/// re-extracting per value as a `valueEqualsNode` loop would. Composite
+/// instances (array/object) fall back to the general deep comparison.
+package bool enumContains(A)(in A.Value v, JsonKind kind, const JsonNode[] values)
+{
+    alias K = JsonNode.Kind;
+    final switch (kind)
+    {
+    case JsonKind.null_:
+        foreach (ref e; values)
+            if (e.kind == K.null_)
+                return true;
+        return false;
+    case JsonKind.boolean:
+        const b = A.getBoolean(v);
+        foreach (ref e; values)
+            if (e.kind == K.boolean && e.boolean_ == b)
+                return true;
+        return false;
+    case JsonKind.string_:
+        const str = A.getString(v);
+        foreach (ref e; values)
+            if (e.kind == K.string_ && e.string_ == str)
+                return true;
+        return false;
+    case JsonKind.integer:
+    case JsonKind.floating:
+        const n = A.getNumber(v);
+        foreach (ref e; values)
+            if (e.isNumber && cmpNumbers(n, numberOfNode(e)) == 0)
+                return true;
+        return false;
+    case JsonKind.array:
+    case JsonKind.object:
+        foreach (ref e; values)
+            if (valueEqualsNode!A(v, e, kind))
+                return true;
+        return false;
     }
 }
 

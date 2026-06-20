@@ -6,6 +6,7 @@
 module jsonschema.compiler;
 
 import jsonschema.adapter : JsonNumber;
+import jsonschema.fastregex;
 import jsonschema.ir;
 import jsonschema.node;
 import jsonschema.pointer : escapeToken, parsePointer, evaluatePointer;
@@ -27,6 +28,7 @@ Validator compileSchema(JsonNode doc, ValidatorSettings settings = ValidatorSett
     resolvePendingRefs(sess);
     auto validator = new Validator(root.root, settings);
     validator.usesUnevaluated = sess.usesUnevaluated;
+    validator.usesDynamicScope = sess.usesDynamicScope;
     return validator;
 }
 
@@ -64,6 +66,11 @@ package final class Session
     /// `unevaluatedProperties` or `unevaluatedItems`. When false, the evaluator
     /// can skip all `Evaluated` annotation bookkeeping.
     bool usesUnevaluated;
+    /// Set when any `$dynamicRef`/`$recursiveRef` resolves through the dynamic
+    /// scope. When false, the evaluator never consults the dynamic-scope stack,
+    /// so it can skip maintaining it entirely (avoiding a per-validation
+    /// allocation for the root push).
+    bool usesDynamicScope;
 
     this(SchemaStore store, ValidatorSettings settings) pure nothrow
     {
@@ -363,7 +370,107 @@ private CompiledSchema walk(Session sess, in JsonNode n, Frame[] frames, string 
             continue;
         // Unknown keyword (or disabled vocabulary): an annotation; ignored.
     }
+
+    s.hasInPlaceApplicators = s.allOf.length > 0 || s.anyOf.length > 0
+        || s.oneOf.length > 0 || s.notSchema !is null || s.ifSchema !is null;
+
+    s.isSimpleScalar = !s.isBoolean && s.refInfo is null && s.dynRefInfo is null
+        && !s.hasInPlaceApplicators && !s.hasFormat
+        && s.properties.length == 0 && s.patternProperties.length == 0
+        && s.additionalProperties is null && s.propertyNames is null
+        && s.required.length == 0 && s.dependentRequired.length == 0
+        && s.dependentSchemas.length == 0
+        && s.maxProperties == absent && s.minProperties == absent
+        && !s.hasPrefixItems && s.itemsSchema is null
+        && s.additionalItemsSchema is null && s.containsSchema is null
+        && s.maxItems == absent && s.minItems == absent && !s.uniqueItems
+        && s.unevaluatedProperties is null && s.unevaluatedItems is null
+        && s.contentSchema is null;
+
+    // A node that carries a static `$ref` and nothing else (the `isSimpleScalar`
+    // emptiness, but with a reference): the evaluator can follow it framelessly.
+    s.isPureRef = s.refInfo !is null && !s.refIsExclusive && s.dynRefInfo is null
+        && !s.hasType && !s.hasEnum && !s.hasConst && !s.hasInPlaceApplicators
+        && !s.hasMultipleOf && !s.hasMaximum && !s.hasExclusiveMaximum
+        && !s.hasMinimum && !s.hasExclusiveMinimum
+        && s.maxLength == absent && s.minLength == absent && !s.hasPattern
+        && s.properties.length == 0 && s.patternProperties.length == 0
+        && s.additionalProperties is null && s.propertyNames is null
+        && s.required.length == 0 && s.dependentRequired.length == 0
+        && s.dependentSchemas.length == 0
+        && s.maxProperties == absent && s.minProperties == absent
+        && !s.hasPrefixItems && s.itemsSchema is null
+        && s.additionalItemsSchema is null && s.containsSchema is null
+        && s.maxItems == absent && s.minItems == absent && !s.uniqueItems
+        && s.maxContains == absent && s.minContains == absent
+        && s.unevaluatedProperties is null && s.unevaluatedItems is null
+        && !s.hasFormat && s.contentSchema is null;
+
+    // Partition `required` against `properties`: a name that is also a property
+    // gets its `PropEntry.required` bit set (so the property scan counts it),
+    // the rest go to `requiredExtra` for an explicit instance lookup.
+    foreach (name; s.required)
+    {
+        if (auto p = name in s.properties)
+        {
+            p.required = true;
+            s.requiredInProps++;
+        }
+        else
+            s.requiredExtra ~= name;
+    }
+
+    // Flatten `properties` into parallel arrays sorted by key for the hot
+    // binary-search lookup in `checkObject`. The `required` bits set above are
+    // already in place, so the copied `PropEntry`s carry them.
+    if (s.properties.length)
+    {
+        import std.algorithm : sort;
+
+        s.propKeys = s.properties.keys;
+        sort(s.propKeys);
+        s.propVals.length = s.propKeys.length;
+        foreach (i, k; s.propKeys)
+        {
+            s.propVals[i] = s.properties[k];
+            classifyPropShape(s.propVals[i]);
+        }
+    }
     return s;
+}
+
+/// Classify a property's subschema into a `PropShape` and pack the parameters
+/// its inline check needs. Conservative: anything carrying a keyword the scalar
+/// shapes don't model stays `general`, so semantics are unchanged.
+private void classifyPropShape(ref PropEntry e) pure nothrow
+{
+    auto cs = e.schema;
+    // Must be a pure scalar node: no applicators/refs/format/object/array
+    // keywords (isSimpleScalar), and none of the scalar extras the shapes omit.
+    if (!cs.isSimpleScalar || !cs.hasType || cs.hasConst || cs.hasEnum
+            || cs.hasPattern || cs.hasMultipleOf
+            || cs.hasExclusiveMaximum || cs.hasExclusiveMinimum)
+        return;
+
+    const m = cs.typeMask;
+    if (m == TypeBit.boolean)
+        e.shape = PropShape.boolean_;
+    else if (m == TypeBit.string_)
+    {
+        e.shape = PropShape.string_;
+        e.lenMin = cs.minLength;
+        e.lenMax = cs.maxLength;
+    }
+    else if (m != 0 && (m & ~cast(int)(TypeBit.integer | TypeBit.number)) == 0)
+    {
+        // Only integer and/or number bits set: a pure numeric type.
+        e.shape = PropShape.numeric_;
+        e.typeMask = m;
+        e.hasLo = cs.hasMinimum;
+        e.lo = cs.minimum;
+        e.hasHi = cs.hasMaximum;
+        e.hi = cs.maximum;
+    }
 }
 
 private SchemaResource newResource(Session sess, string uri, string dialect,
@@ -531,8 +638,8 @@ private bool compileApplicatorKeyword(Session sess, CompiledSchema s, string key
     case "properties":
         requireObject(val, key);
         foreach (ref m; val.members_)
-            s.properties[m.key] = walk(sess, m.value,
-                    frames.extend("/properties/" ~ escapeToken(m.key)), null);
+            s.properties[m.key] = PropEntry(walk(sess, m.value,
+                    frames.extend("/properties/" ~ escapeToken(m.key)), null));
         return true;
     case "patternProperties":
         requireObject(val, key);
@@ -686,6 +793,7 @@ private bool compileValidationKeyword(CompiledSchema s, string key, in JsonNode 
         s.hasPattern = true;
         s.patternSource = val.string_;
         s.pattern = compileRegex(val.string_, "pattern");
+        s.fastPattern = jsonschema.fastregex.compile(val.string_);
         return true;
     case "maxItems":
         s.maxItems = nonNegativeIntegerOf(val, key);
@@ -975,12 +1083,16 @@ private void resolveRef(Session sess, SchemaRef r)
         // dynamic anchor); otherwise it behaves as a plain `$ref`.
         r.anchorName = "";
         r.dynamicCandidate = ("" in res.dynamicAnchors) !is null;
+        if (r.dynamicCandidate)
+            sess.usesDynamicScope = true;
     }
     else if (r.dynamic && anchorName.length)
     {
         r.anchorName = anchorName;
         auto dyn = anchorName in res.dynamicAnchors;
         r.dynamicCandidate = dyn !is null && *dyn is target;
+        if (r.dynamicCandidate)
+            sess.usesDynamicScope = true;
     }
 }
 

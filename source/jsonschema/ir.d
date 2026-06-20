@@ -7,6 +7,7 @@
 module jsonschema.ir;
 
 import jsonschema.adapter : JsonNumber;
+import jsonschema.fastregex : FastRegex;
 import jsonschema.node : JsonNode;
 import std.regex : Regex;
 
@@ -229,6 +230,39 @@ struct PatternProperty
     CompiledSchema schema;
 }
 
+/// Common scalar shape of a property's subschema, classified at compile time so
+/// the hot `checkObject` member loop can validate it inline — reading packed
+/// bounds from the (cache-warm, contiguous) property array — instead of routing
+/// through `evalChild`/`evalSchema` and chasing into the `CompiledSchema` class.
+/// `general` covers everything not reducible to one of the scalar shapes.
+enum PropShape : ubyte
+{
+    general,
+    boolean_, /// `type: boolean`, no other constraints
+    string_, /// `type: string`, optional min/maxLength only
+    numeric_ /// `type: integer`/`number` (only), optional inclusive min/maximum
+}
+
+/// `properties` entry: the subschema, whether the property name also appears in
+/// `required`, and a precomputed scalar shape with packed parameters. The
+/// `required` bit lets `checkObject` confirm a required property is present
+/// during its single member pass rather than a second hashing lookup per name.
+/// The `shape` (plus packed bounds) lets it validate common scalar properties
+/// inline without dispatching through the general evaluator.
+struct PropEntry
+{
+    CompiledSchema schema;
+    bool required;
+    PropShape shape = PropShape.general;
+    // numeric_: the `type` mask (for typeMatches) and inclusive bounds.
+    ubyte typeMask;
+    bool hasLo, hasHi;
+    JsonNumber lo, hi;
+    // string_: code-point length bounds (`absent` when unset).
+    long lenMin = absent;
+    long lenMax = absent;
+}
+
 /// Bit flags for the `type` keyword.
 enum TypeBit : ubyte
 {
@@ -292,6 +326,9 @@ final class CompiledSchema
     bool hasPattern;
     string patternSource;
     Regex!char pattern;
+    /// Fast-path matcher for the common ASCII pattern subset; when
+    /// `fastPattern.compiled`, the evaluator uses it instead of `pattern`.
+    FastRegex fastPattern;
 
     // --- validation: arrays ---
     long maxItems = absent;
@@ -304,6 +341,12 @@ final class CompiledSchema
     long maxProperties = absent;
     long minProperties = absent;
     string[] required;
+    /// `required` names that are not also keys of `properties`; these still
+    /// need an explicit instance lookup. Names that *are* properties are
+    /// counted by `requiredInProps` and confirmed during the property scan.
+    string[] requiredExtra;
+    /// Number of `required` names that are also keys of `properties`.
+    size_t requiredInProps;
     string[][string] dependentRequired;
 
     // --- applicators: in place ---
@@ -315,9 +358,30 @@ final class CompiledSchema
     CompiledSchema thenSchema;
     CompiledSchema elseSchema;
     CompiledSchema[string] dependentSchemas;
+    /// True when any of `allOf`/`anyOf`/`oneOf`/`not`/`if` is present. Lets the
+    /// evaluator skip the (frame-heavy) in-place applicator helper entirely for
+    /// the common schema that has none.
+    bool hasInPlaceApplicators;
+    /// True when this schema constrains only scalar instances — `type`, `enum`,
+    /// `const`, and the numeric/string bound keywords — with no references,
+    /// applicators, object/array child keywords, `unevaluated*`, format
+    /// assertion, or content. Such a node cannot recurse, so the evaluator
+    /// validates it through a tiny fast path that skips the depth guard, the
+    /// dynamic-scope stack, and the reference/applicator cascade.
+    bool isSimpleScalar;
+    /// True when this schema is nothing but a static `$ref` (no sibling
+    /// keywords, not draft-07-exclusive, not dynamic). The evaluator can follow
+    /// the reference to its target without spending a stack frame on this node.
+    bool isPureRef;
 
     // --- applicators: children ---
-    CompiledSchema[string] properties;
+    PropEntry[string] properties;
+    /// `properties` flattened into parallel arrays sorted by key, for the hot
+    /// per-member lookup in `checkObject`: an inlined binary search here avoids
+    /// the out-of-line druntime calls (`_aaInX`, `hashOf`) of an `in` on the
+    /// associative array. Built at the end of compilation.
+    string[] propKeys;
+    PropEntry[] propVals;
     PatternProperty[] patternProperties;
     CompiledSchema additionalProperties;
     CompiledSchema propertyNames;
